@@ -10,13 +10,15 @@ import { ALL_FOLDER_ID, STICKER_SIZE_FOLDER_SETTINGS } from '../../../../config'
 import { LOCAL_TGS_URLS } from '../../../common/helpers/animatedAssets';
 import { MEMO_EMPTY_ARRAY } from '../../../../util/memo';
 import { throttle } from '../../../../util/schedulers';
+import { isBetween } from '../../../../util/math';
 import { getFolderDescriptionText } from '../../../../global/helpers';
-import useLang from '../../../../hooks/useLang';
-import useHistoryBack from '../../../../hooks/useHistoryBack';
-import { useFolderManagerForChatsCount } from '../../../../hooks/useFolderManager';
 import { selectCurrentLimit } from '../../../../global/selectors/limits';
 import { selectIsCurrentUserPremium } from '../../../../global/selectors';
 import renderText from '../../../common/helpers/renderText';
+import useLang from '../../../../hooks/useLang';
+import useHistoryBack from '../../../../hooks/useHistoryBack';
+import { useFolderManagerForChatsCount } from '../../../../hooks/useFolderManager';
+import usePrevious from '../../../../hooks/usePrevious';
 
 import ListItem from '../../../ui/ListItem';
 import Button from '../../../ui/Button';
@@ -73,6 +75,19 @@ const SettingsFoldersMain: FC<OwnProps & StateProps> = ({
     draggedIndex: undefined,
   });
 
+  const prevFolderIds = usePrevious(folderIds);
+
+  // Sync folders state after changing folders in other clients
+  useEffect(() => {
+    if (prevFolderIds !== folderIds) {
+      setState({
+        orderedFolderIds: folderIds,
+        dragOrderIds: folderIds,
+        draggedIndex: undefined,
+      });
+    }
+  }, [prevFolderIds, folderIds, state.orderedFolderIds?.length]);
+
   // Due to the parent Transition, this component never gets unmounted,
   // that's why we use throttled API call on every update.
   useEffect(() => {
@@ -102,15 +117,15 @@ const SettingsFoldersMain: FC<OwnProps & StateProps> = ({
 
   const chatsCountByFolderId = useFolderManagerForChatsCount();
   const userFolders = useMemo(() => {
-    if (!state.orderedFolderIds) {
+    if (!folderIds) {
       return undefined;
     }
 
-    if (state.orderedFolderIds.length <= 1) {
+    if (folderIds.length <= 1) {
       return MEMO_EMPTY_ARRAY;
     }
 
-    return state.orderedFolderIds.map((id) => {
+    return folderIds.map((id) => {
       const folder = foldersById[id];
 
       if (id === ALL_FOLDER_ID) {
@@ -126,7 +141,7 @@ const SettingsFoldersMain: FC<OwnProps & StateProps> = ({
         subtitle: getFolderDescriptionText(lang, folder, chatsCountByFolderId[folder.id]),
       };
     });
-  }, [state.orderedFolderIds, foldersById, lang, chatsCountByFolderId]);
+  }, [folderIds, foldersById, lang, chatsCountByFolderId]);
 
   const handleCreateFolderFromRecommended = useCallback((folder: ApiChatFolder) => {
     if (Object.keys(foldersById).length >= maxFolders - 1) {
@@ -140,16 +155,16 @@ const SettingsFoldersMain: FC<OwnProps & StateProps> = ({
     addChatFolder({ folder });
   }, [foldersById, maxFolders, addChatFolder, openLimitReachedModal]);
 
-  const handleDrag = useCallback((translation: { x: number; y: number }, id: number) => {
+  const handleDrag = useCallback((translation: { x: number; y: number }, id: string | number) => {
     const delta = Math.round(translation.y / FOLDER_HEIGHT_PX);
-    const index = state.orderedFolderIds?.indexOf(id) || 0;
+    const index = state.orderedFolderIds?.indexOf(id as number) || 0;
     const dragOrderIds = state.orderedFolderIds?.filter((folderId) => folderId !== id);
 
-    if (!dragOrderIds || !inRange(index + delta, 0, folderIds?.length || 0)) {
+    if (!dragOrderIds || !isBetween(index + delta, 0, folderIds?.length || 0)) {
       return;
     }
 
-    dragOrderIds.splice(index + delta + (isPremium ? 0 : 1), 0, id);
+    dragOrderIds.splice(index + delta + (isPremium ? 0 : 1), 0, id as number);
     setState((current) => ({
       ...current,
       draggedIndex: index,
@@ -348,7 +363,3 @@ export default memo(withGlobal<OwnProps>(
     };
   },
 )(SettingsFoldersMain));
-
-function inRange(x: number, min: number, max: number) {
-  return x >= min && x <= max;
-}

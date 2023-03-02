@@ -1,6 +1,6 @@
 import type { FC } from '../../lib/teact/teact';
 import React, {
-  memo, useCallback, useEffect, useRef,
+  memo, useCallback, useEffect, useRef, useState,
 } from '../../lib/teact/teact';
 
 import type { ApiVideo } from '../../api/types';
@@ -13,7 +13,6 @@ import { useIsIntersecting } from '../../hooks/useIntersectionObserver';
 import { preventMessageInputBlurWithBubbling } from '../middle/helpers/preventMessageInputBlur';
 
 import useMedia from '../../hooks/useMedia';
-import useVideoCleanup from '../../hooks/useVideoCleanup';
 import useBuffering from '../../hooks/useBuffering';
 import useCanvasBlur from '../../hooks/useCanvasBlur';
 import useLang from '../../hooks/useLang';
@@ -24,6 +23,7 @@ import Spinner from '../ui/Spinner';
 import Button from '../ui/Button';
 import Menu from '../ui/Menu';
 import MenuItem from '../ui/MenuItem';
+import OptimizedVideo from '../ui/OptimizedVideo';
 
 import './GifButton.scss';
 
@@ -48,24 +48,20 @@ const GifButton: FC<OwnProps> = ({
 }) => {
   // eslint-disable-next-line no-null/no-null
   const ref = useRef<HTMLDivElement>(null);
-  // eslint-disable-next-line no-null/no-null
-  const videoRef = useRef<HTMLVideoElement>(null);
 
   const lang = useLang();
 
-  const hasThumbnail = Boolean(gif.thumbnail?.dataUri);
   const localMediaHash = `gif${gif.id}`;
   const isIntersecting = useIsIntersecting(ref, observeIntersection);
   const loadAndPlay = isIntersecting && !isDisabled;
   const previewBlobUrl = useMedia(`${localMediaHash}?size=m`, !loadAndPlay, ApiMediaFormat.BlobUrl);
-  const thumbRef = useCanvasBlur(gif.thumbnail?.dataUri, Boolean(previewBlobUrl));
+  const [withThumb] = useState(gif.thumbnail?.dataUri && !previewBlobUrl);
+  const thumbRef = useCanvasBlur(gif.thumbnail?.dataUri, !withThumb);
   const videoData = useMedia(localMediaHash, !loadAndPlay, ApiMediaFormat.BlobUrl);
   const shouldRenderVideo = Boolean(loadAndPlay && videoData);
   const { isBuffered, bufferingHandlers } = useBuffering(true);
   const shouldRenderSpinner = loadAndPlay && !isBuffered;
   const isVideoReady = loadAndPlay && isBuffered;
-
-  useVideoCleanup(videoRef, [shouldRenderVideo]);
 
   const {
     isContextMenuOpen, contextMenuPosition,
@@ -161,7 +157,7 @@ const GifButton: FC<OwnProps> = ({
           <i className="icon-close gif-unsave-button-icon" />
         </Button>
       )}
-      {hasThumbnail && (
+      {withThumb && (
         <canvas
           ref={thumbRef}
           className="thumbnail"
@@ -177,8 +173,9 @@ const GifButton: FC<OwnProps> = ({
         />
       )}
       {shouldRenderVideo && (
-        <video
-          ref={videoRef}
+        <OptimizedVideo
+          canPlay
+          src={videoData}
           autoPlay
           loop
           muted
@@ -187,12 +184,10 @@ const GifButton: FC<OwnProps> = ({
           preload="none"
           // eslint-disable-next-line react/jsx-props-no-spreading
           {...bufferingHandlers}
-        >
-          <source src={videoData} />
-        </video>
+        />
       )}
       {shouldRenderSpinner && (
-        <Spinner color={previewBlobUrl || hasThumbnail ? 'white' : 'black'} />
+        <Spinner color={previewBlobUrl || withThumb ? 'white' : 'black'} />
       )}
       {onClick && contextMenuPosition !== undefined && (
         <Menu

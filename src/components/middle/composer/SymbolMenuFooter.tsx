@@ -10,28 +10,32 @@ type OwnProps = {
   onSwitchTab: (tab: SymbolMenuTabs) => void;
   onRemoveSymbol: () => void;
   onSearchOpen: (type: 'stickers' | 'gifs') => void;
+  isAttachmentModal?: boolean;
 };
 
 export enum SymbolMenuTabs {
   'Emoji',
+  'CustomEmoji',
   'Stickers',
   'GIFs',
 }
 
 export const SYMBOL_MENU_TAB_TITLES: Record<SymbolMenuTabs, string> = {
   [SymbolMenuTabs.Emoji]: 'Emoji',
+  [SymbolMenuTabs.CustomEmoji]: 'StickersList.EmojiItem',
   [SymbolMenuTabs.Stickers]: 'AccDescrStickers',
   [SymbolMenuTabs.GIFs]: 'GifsTab',
 };
 
 const SYMBOL_MENU_TAB_ICONS = {
   [SymbolMenuTabs.Emoji]: 'icon-smile',
+  [SymbolMenuTabs.CustomEmoji]: 'icon-favorite',
   [SymbolMenuTabs.Stickers]: 'icon-stickers',
   [SymbolMenuTabs.GIFs]: 'icon-gifs',
 };
 
 const SymbolMenuFooter: FC<OwnProps> = ({
-  activeTab, onSwitchTab, onRemoveSymbol, onSearchOpen,
+  activeTab, onSwitchTab, onRemoveSymbol, onSearchOpen, isAttachmentModal,
 }) => {
   const lang = useLang();
 
@@ -61,7 +65,7 @@ const SymbolMenuFooter: FC<OwnProps> = ({
 
   return (
     <div className="SymbolMenu-footer" onClick={stopPropagation} dir={lang.isRtl ? 'rtl' : undefined}>
-      {activeTab !== SymbolMenuTabs.Emoji && (
+      {activeTab !== SymbolMenuTabs.Emoji && activeTab !== SymbolMenuTabs.CustomEmoji && (
         <Button
           className="symbol-search-button"
           ariaLabel={activeTab === SymbolMenuTabs.Stickers ? 'Search Stickers' : 'Search GIFs'}
@@ -75,10 +79,11 @@ const SymbolMenuFooter: FC<OwnProps> = ({
       )}
 
       {renderTabButton(SymbolMenuTabs.Emoji)}
-      {renderTabButton(SymbolMenuTabs.Stickers)}
-      {renderTabButton(SymbolMenuTabs.GIFs)}
+      {renderTabButton(SymbolMenuTabs.CustomEmoji)}
+      {!isAttachmentModal && renderTabButton(SymbolMenuTabs.Stickers)}
+      {!isAttachmentModal && renderTabButton(SymbolMenuTabs.GIFs)}
 
-      {activeTab === SymbolMenuTabs.Emoji && (
+      {(activeTab === SymbolMenuTabs.Emoji || activeTab === SymbolMenuTabs.CustomEmoji) && (
         <Button
           className="symbol-delete-button"
           onClick={onRemoveSymbol}

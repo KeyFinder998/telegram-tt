@@ -3,7 +3,7 @@ import type {
   ApiBotInlineMediaResult, ApiBotInlineResult, ApiBotInlineSwitchPm,
   ApiChatInviteImporter,
   ApiExportedInvite,
-  ApiLanguage, ApiMessage, ApiShippingAddress, ApiStickerSet, ApiWebDocument,
+  ApiLanguage, ApiMessage, ApiStickerSet,
 } from '../api/types';
 
 export type TextPart = TeactNode;
@@ -78,6 +78,7 @@ export interface ISettings extends NotifySettings, Record<string, any> {
   canAutoPlayGifs: boolean;
   canAutoPlayVideos: boolean;
   shouldSuggestStickers: boolean;
+  shouldSuggestCustomEmoji: boolean;
   shouldLoopStickers: boolean;
   hasPassword?: boolean;
   languages?: ApiLanguage[];
@@ -128,34 +129,17 @@ export interface Price {
   amount: number;
 }
 
-export interface Invoice {
+export interface ApiInvoiceContainer {
+  isTest?: boolean;
+  isNameRequested?: boolean;
+  isPhoneRequested?: boolean;
+  isEmailRequested?: boolean;
+  isShippingAddressRequested?: boolean;
+  isFlexible?: boolean;
+  shouldSendPhoneToProvider?: boolean;
+  shouldSendEmailToProvider?: boolean;
   currency?: string;
-  emailRequested?: boolean;
-  emailToProvider?: boolean;
-  flexible?: boolean;
-  nameRequested?: boolean;
-  phoneRequested?: boolean;
-  phoneToProvider?: boolean;
   prices?: Price[];
-  shippingAddressRequested?: boolean;
-  test?: boolean;
-}
-
-export interface Receipt {
-  currency: string;
-  prices: Price[];
-  info?: {
-    shippingAddress?: ApiShippingAddress;
-    phone?: string;
-    name?: string;
-  };
-  totalAmount: number;
-  credentialsTitle: string;
-  shippingPrices?: Price[];
-  shippingMethod?: string;
-  photo?: ApiWebDocument;
-  text?: string;
-  title?: string;
 }
 
 export enum SettingsScreens {
@@ -235,7 +219,8 @@ export enum SettingsScreens {
 }
 
 export type StickerSetOrRecent = Pick<ApiStickerSet, (
-  'id' | 'title' | 'count' | 'stickers' | 'hasThumbnail' | 'isLottie' | 'isVideos' | 'isEmoji' | 'installedDate'
+  'id' | 'accessHash' | 'title' | 'count' | 'stickers' | 'hasThumbnail' | 'isLottie' | 'isVideos' | 'isEmoji' |
+  'installedDate' | 'isArchived'
 )>;
 
 export enum LeftColumnContent {
@@ -269,6 +254,8 @@ export enum RightColumnContent {
   GifSearch,
   PollResults,
   AddingMembers,
+  CreateTopic,
+  EditTopic,
 }
 
 export enum MediaViewerOrigin {
@@ -281,6 +268,7 @@ export enum MediaViewerOrigin {
   Album,
   ScheduledAlbum,
   SearchResult,
+  SuggestedAvatar,
 }
 
 export enum AudioOrigin {
@@ -313,6 +301,7 @@ export enum ManagementProgress {
 export interface ManagementState {
   isActive: boolean;
   nextScreen?: ManagementScreens;
+  checkedUsername?: string;
   isUsernameAvailable?: boolean;
   error?: string;
   invites?: ApiExportedInvite[];
@@ -344,10 +333,12 @@ export enum ProfileState {
 }
 
 export enum PaymentStep {
+  Checkout,
+  SavedPayments,
+  ConfirmPassword,
+  PaymentInfo,
   ShippingInfo,
   Shipping,
-  PaymentInfo,
-  Checkout,
   ConfirmPayment,
 }
 
@@ -400,4 +391,5 @@ export type InlineBotSettings = {
   results?: (ApiBotInlineResult | ApiBotInlineMediaResult)[];
   isGallery?: boolean;
   switchPm?: ApiBotInlineSwitchPm;
+  cacheTime: number;
 };

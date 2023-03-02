@@ -1,23 +1,30 @@
-**Telegram Web Z was updated to version 1.52**
+**Telegram Web Z was updated to version 1.59**
 
-👏 **Harder**
-• Added support for username.t.me links.
-• ‘Update Telegram’ button now automatically appears when an update is available.
-• Games can now request a share window.
+[👏](customEmoji:5471921242866981303) **Harder**
+• Chats can be opened in multiple browser tabs or windows.
+• A spoiler effect is available for photos and videos.
+• You can replace profile photos of contacts or suggest new ones.
+• Your account can have a public profile photo, in addition to the main one.
+• Media can be sent from your clipboard without compression.
+• Topics are able to be created or edited in groups.
+• Syntax highlighting is now supported for Type (.tl) language.
 
-🤩 **Better**
-• Square images for web page previews are now properly displayed.
-• Auth screen transitions are now smoother.
-• Changelog notifications are only delivered every 3 days.
+[🤩](customEmoji:5373026167722876724) **Better**
+• Multiple media items can be sent as separate messages from the attachment menu.
+• The audio player now supports multiple playback speeds.
+• The topic panel can be quickly closed with a swipe.
 
-🚀 **Faster**
-• Interface performance was heavily optimized.
-• Initial app bundle is now even more lightweight.
+[🚀](customEmoji:5445284980978621387) **Faster**
+• Animations in the topic panel are faster and lighter.
 
-💪 **Stronger**
-• Fixed several issues causing missing chats.
-• Fixed frozen UI on Android after selecting ‘Nice and Fast’ animation setting.
-• Fixed Play button overlapping with Slide Left button in Media Viewer.
-• Fixed quick reaction button not showing in some cases.
-• Fixed names and profile pictures for deleted accounts.
-• Numerous other layout fixes.
+[💪](customEmoji:5471883477219549006) **Stronger**
+• Fixed some chats being hidden in the chat list.
+• Fixed the app reloading when resizing the window.
+• Fixed missing video in group video calls.
+• Fixed problems with deleting chat history.
+• Fixed missing text formats when composing a message.
+• Fixed jumping cursor when editing chat description.
+• Fixed app URL not updating after closing a chat.
+• Fixed yellow border when switching profile photos.
+• Fixed call indicator not hiding after a call ends.
+• Various layout improvements.

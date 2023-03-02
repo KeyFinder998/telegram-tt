@@ -3,14 +3,14 @@ import { addActionHandler, getGlobal, setGlobal } from '../../index';
 import { MAIN_THREAD_ID } from '../../../api/types';
 
 import { ARCHIVED_FOLDER_ID, MAX_ACTIVE_PINNED_CHATS } from '../../../config';
-import { pick } from '../../../util/iteratees';
+import { buildCollectionByKey, pick } from '../../../util/iteratees';
 import { closeMessageNotifications, notifyAboutMessage } from '../../../util/notifications';
 import {
   updateChat,
   updateChatListIds,
   updateChatListType,
   replaceThreadParam,
-  leaveChat,
+  leaveChat, updateTopic,
 } from '../../reducers';
 import {
   selectChat,
@@ -18,17 +18,20 @@ import {
   selectIsChatListed,
   selectChatListType,
   selectCurrentMessageList,
+  selectThreadParam,
 } from '../../selectors';
 import { updateUnreadReactions } from '../../reducers/reactions';
+import type { ActionReturnType } from '../../types';
 
 const TYPING_STATUS_CLEAR_DELAY = 6000; // 6 seconds
-// Enough to animate and mark as read in Message List
-const CURRENT_CHAT_UNREAD_DELAY = 1500;
 
-addActionHandler('apiUpdate', (global, actions, update) => {
+addActionHandler('apiUpdate', (global, actions, update): ActionReturnType => {
   switch (update['@type']) {
     case 'updateChat': {
-      setGlobal(updateChat(global, update.id, update.chat, update.newProfilePhoto));
+      const { isForum: prevIsForum } = selectChat(global, update.id) || {};
+
+      global = updateChat(global, update.id, update.chat, update.newProfilePhoto);
+      setGlobal(global);
 
       if (!update.noTopChatsRequest && !selectIsChatListed(global, update.id)) {
         // Chat can appear in dialogs list.
@@ -41,6 +44,17 @@ addActionHandler('apiUpdate', (global, actions, update) => {
           lastReadInboxMessageId: update.chat.lastReadInboxMessageId,
         });
       }
+
+      Object.values(global.byTabId).forEach(({ id: tabId }) => {
+        const { chatId: currentChatId } = selectCurrentMessageList(global, tabId) || {};
+        // The property `isForum` was changed in another client
+        if (currentChatId === update.id && 'isForum' in update.chat && prevIsForum !== update.chat.isForum) {
+          if (prevIsForum) {
+            actions.closeForumPanel({ tabId });
+          }
+          actions.openChat({ id: currentChatId, tabId });
+        }
+      });
 
       return undefined;
     }
@@ -72,14 +86,16 @@ addActionHandler('apiUpdate', (global, actions, update) => {
     }
 
     case 'updateChatTypingStatus': {
-      const { id, typingStatus } = update;
-      setGlobal(updateChat(global, id, { typingStatus }));
+      const { id, threadId = MAIN_THREAD_ID, typingStatus } = update;
+      global = replaceThreadParam(global, id, threadId, 'typingStatus', typingStatus);
+      setGlobal(global);
 
       setTimeout(() => {
         global = getGlobal();
-        const chat = selectChat(global, id);
-        if (chat && typingStatus && chat.typingStatus && chat.typingStatus.timestamp === typingStatus.timestamp) {
-          setGlobal(updateChat(global, id, { typingStatus: undefined }));
+        const currentTypingStatus = selectThreadParam(global, id, threadId, 'typingStatus');
+        if (typingStatus && currentTypingStatus && typingStatus.timestamp === currentTypingStatus.timestamp) {
+          global = replaceThreadParam(global, id, threadId, 'typingStatus', undefined);
+          setGlobal(global);
         }
       }, TYPING_STATUS_CLEAR_DELAY);
 
@@ -88,7 +104,6 @@ addActionHandler('apiUpdate', (global, actions, update) => {
 
     case 'newMessage': {
       const { message } = update;
-      const { chatId: currentChatId, threadId, type: messageListType } = selectCurrentMessageList(global) || {};
 
       if (message.senderId === global.currentUserId && !message.isFromScheduled) {
         return undefined;
@@ -99,25 +114,20 @@ addActionHandler('apiUpdate', (global, actions, update) => {
         return undefined;
       }
 
-      const isActiveChat = (
-        messageListType === 'thread'
-        && threadId === MAIN_THREAD_ID
-        && update.chatId === currentChatId
-      );
+      const hasMention = Boolean(update.message.id && update.message.hasUnreadMention);
 
-      if (isActiveChat) {
-        setTimeout(() => {
-          actions.requestChatUpdate({ chatId: update.chatId });
-        }, CURRENT_CHAT_UNREAD_DELAY);
+      global = updateChat(global, update.chatId, {
+        unreadCount: chat.unreadCount ? chat.unreadCount + 1 : 1,
+        ...(hasMention && { unreadMentionsCount: (chat.unreadMentionsCount || 0) + 1 }),
+      });
+
+      if (hasMention) {
+        global = updateChat(global, update.chatId, {
+          unreadMentions: [...(chat.unreadMentions || []), update.message.id!],
+        });
       }
 
-      setGlobal(updateChat(global, update.chatId, {
-        unreadCount: chat.unreadCount ? chat.unreadCount + 1 : 1,
-        ...(update.message.id && update.message.hasUnreadMention && {
-          unreadMentionsCount: (chat.unreadMentionsCount || 0) + 1,
-          unreadMentions: [...(chat.unreadMentions || []), update.message.id],
-        }),
-      }));
+      setGlobal(global);
 
       notifyAboutMessage({
         chat,
@@ -319,7 +329,7 @@ addActionHandler('apiUpdate', (global, actions, update) => {
           fullInfo: {
             ...targetChat.fullInfo,
             members,
-            adminMembers,
+            adminMembersById: buildCollectionByKey(adminMembers, 'userId'),
           },
         });
       }
@@ -342,15 +352,15 @@ addActionHandler('apiUpdate', (global, actions, update) => {
 
     case 'draftMessage': {
       const {
-        chatId, formattedText, date, replyingToId,
+        chatId, formattedText, date, replyingToId, threadId,
       } = update;
       const chat = global.chats.byId[chatId];
       if (!chat) {
         return undefined;
       }
 
-      global = replaceThreadParam(global, chatId, MAIN_THREAD_ID, 'draft', formattedText);
-      global = replaceThreadParam(global, chatId, MAIN_THREAD_ID, 'replyingToId', replyingToId);
+      global = replaceThreadParam(global, chatId, threadId || MAIN_THREAD_ID, 'draft', formattedText);
+      global = replaceThreadParam(global, chatId, threadId || MAIN_THREAD_ID, 'replyingToId', replyingToId);
       global = updateChat(global, chatId, { draftDate: date });
       return global;
     }
@@ -358,7 +368,9 @@ addActionHandler('apiUpdate', (global, actions, update) => {
     case 'showInvite': {
       const { data } = update;
 
-      actions.showDialog({ data });
+      Object.values(global.byTabId).forEach(({ id: tabId }) => {
+        actions.showDialog({ data, tabId });
+      });
 
       return undefined;
     }
@@ -380,6 +392,59 @@ addActionHandler('apiUpdate', (global, actions, update) => {
       setGlobal(global);
 
       actions.loadChatJoinRequests({ chatId });
+      return undefined;
+    }
+
+    case 'updatePinnedTopic': {
+      const { chatId, topicId, isPinned } = update;
+
+      const chat = global.chats.byId[chatId];
+      if (!chat) {
+        return undefined;
+      }
+
+      global = updateTopic(global, chatId, topicId, {
+        isPinned,
+      });
+      setGlobal(global);
+
+      return undefined;
+    }
+
+    case 'updatePinnedTopicsOrder': {
+      const { chatId, order } = update;
+
+      const chat = global.chats.byId[chatId];
+      if (!chat) return undefined;
+
+      global = updateChat(global, chatId, {
+        orderedPinnedTopicIds: order,
+      });
+      setGlobal(global);
+
+      return undefined;
+    }
+
+    case 'updateTopic': {
+      const { chatId, topicId } = update;
+
+      const chat = selectChat(global, chatId);
+      if (!chat?.isForum) return undefined;
+
+      actions.loadTopicById({ chatId, topicId });
+
+      return undefined;
+    }
+
+    case 'updateTopics': {
+      const { chatId } = update;
+
+      const chat = selectChat(global, chatId);
+      if (!chat?.isForum) return undefined;
+
+      actions.loadTopics({ chatId, force: true });
+
+      return undefined;
     }
   }
 

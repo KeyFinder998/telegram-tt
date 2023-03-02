@@ -29,6 +29,7 @@ const SettingsLanguage: FC<OwnProps & StateProps> = ({
 }) => {
   const {
     loadLanguages,
+    loadAttachBots,
     setSettingOption,
   } = getActions();
 
@@ -47,9 +48,11 @@ const SettingsLanguage: FC<OwnProps & StateProps> = ({
     void setLanguage(langCode as LangCode, () => {
       unmarkIsLoading();
 
-      setSettingOption({ language: langCode });
+      setSettingOption({ language: langCode as LangCode });
+
+      loadAttachBots(); // Should be refetched every language change
     });
-  }, [markIsLoading, unmarkIsLoading, setSettingOption]);
+  }, [markIsLoading, unmarkIsLoading, setSettingOption, loadAttachBots]);
 
   const options = useMemo(() => {
     return languages ? buildOptions(languages) : undefined;

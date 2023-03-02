@@ -3,7 +3,7 @@ import type {
   ApiUser,
   ApiChatBannedRights,
   ApiChatAdminRights,
-  ApiChatFolder,
+  ApiChatFolder, ApiTopic, ApiUserFullInfo,
 } from '../../api/types';
 import {
   MAIN_THREAD_ID,
@@ -12,7 +12,9 @@ import {
 import type { NotifyException, NotifySettings } from '../../types';
 import type { LangFn } from '../../hooks/useLang';
 
-import { ARCHIVED_FOLDER_ID, REPLIES_USER_ID, TME_LINK_PREFIX } from '../../config';
+import {
+  ARCHIVED_FOLDER_ID, GENERAL_TOPIC_ID, REPLIES_USER_ID, TME_LINK_PREFIX,
+} from '../../config';
 import { orderBy } from '../../util/iteratees';
 import { getUserFirstOrLastName } from './users';
 import { formatDateToString, formatTime } from '../../util/dateFormat';
@@ -94,9 +96,12 @@ export function getChatDescription(chat: ApiChat) {
 }
 
 export function getChatLink(chat: ApiChat) {
-  const { username } = chat;
-  if (username) {
-    return `${TME_LINK_PREFIX}${username}`;
+  const { usernames } = chat;
+  if (usernames) {
+    const activeUsername = usernames.find((u) => u.isActive);
+    if (activeUsername) {
+      return `${TME_LINK_PREFIX}${activeUsername.username}`;
+    }
   }
 
   const { inviteLink } = chat.fullInfo || {};
@@ -104,28 +109,47 @@ export function getChatLink(chat: ApiChat) {
   return inviteLink;
 }
 
+export function getChatMessageLink(chatId: string, chatUsername?: string, threadId?: number, messageId?: number) {
+  const chatPart = chatUsername || `c/${chatId.replace('-', '')}`;
+  const threadPart = threadId && threadId !== MAIN_THREAD_ID ? `/${threadId}` : '';
+  const messagePart = messageId ? `/${messageId}` : '';
+  return `${TME_LINK_PREFIX}${chatPart}${threadPart}${messagePart}`;
+}
+
+export function getTopicLink(chatId: string, chatUsername?: string, topicId?: number) {
+  return getChatMessageLink(chatId, chatUsername, topicId);
+}
+
 export function getChatAvatarHash(
   owner: ApiChat | ApiUser,
   size: 'normal' | 'big' = 'normal',
   type: 'photo' | 'video' = 'photo',
+  avatarHash = owner.avatarHash,
 ) {
-  if (!owner.avatarHash) {
+  if (!avatarHash) {
     return undefined;
   }
   const { fullInfo } = owner;
 
   if (type === 'video') {
+    const userFullInfo = isUserId(owner.id) ? fullInfo as ApiUserFullInfo : undefined;
+    if (userFullInfo?.personalPhoto?.isVideo) {
+      return getVideoAvatarMediaHash(userFullInfo.personalPhoto);
+    }
     if (fullInfo?.profilePhoto?.isVideo) {
       return getVideoAvatarMediaHash(fullInfo.profilePhoto);
+    }
+    if (userFullInfo?.fallbackPhoto?.isVideo) {
+      return getVideoAvatarMediaHash(userFullInfo.fallbackPhoto);
     }
     return undefined;
   }
 
   switch (size) {
     case 'big':
-      return `profile${owner.id}?${owner.avatarHash}`;
+      return `profile${owner.id}?${avatarHash}`;
     default:
-      return `avatar${owner.id}?${owner.avatarHash}`;
+      return `avatar${owner.id}?${avatarHash}`;
   }
 }
 
@@ -141,6 +165,11 @@ export function getHasAdminRight(chat: ApiChat, key: keyof ApiChatAdminRights) {
   return chat.adminRights ? chat.adminRights[key] : false;
 }
 
+export function getCanManageTopic(chat: ApiChat, topic: ApiTopic) {
+  if (topic.id === GENERAL_TOPIC_ID) return chat.isCreator;
+  return chat.isCreator || getHasAdminRight(chat, 'manageTopics') || topic.isOwner;
+}
+
 export function isUserRightBanned(chat: ApiChat, key: keyof ApiChatBannedRights) {
   return Boolean(
     (chat.currentUserBannedRights?.[key])
@@ -150,7 +179,17 @@ export function isUserRightBanned(chat: ApiChat, key: keyof ApiChatBannedRights)
 
 export function getCanPostInChat(chat: ApiChat, threadId: number) {
   if (threadId !== MAIN_THREAD_ID) {
-    return true;
+    if (chat.isForum) {
+      if (chat.isNotJoined) {
+        return false;
+      }
+
+      const topic = chat.topics?.[threadId];
+      if (topic?.isClosed && !topic.isOwner && !getHasAdminRight(chat, 'manageTopics')) {
+        return false;
+      }
+    }
+    return true; // TODO[forums] legacy value, check that again
   }
 
   if (chat.isRestricted || chat.isForbidden || chat.migratedTo || chat.isNotJoined || isChatWithRepliesBot(chat.id)) {
@@ -222,6 +261,30 @@ export function getMessageSendingRestrictionReason(
 
   if (defaultBannedRights?.sendMessages) {
     return lang('Channel.Persmission.Denied.SendMessages.DefaultRestrictedText');
+  }
+
+  return undefined;
+}
+
+export function getForumComposerPlaceholder(
+  lang: LangFn, chat?: ApiChat, threadId = MAIN_THREAD_ID, isReplying?: boolean,
+) {
+  if (!chat?.isForum) {
+    return undefined;
+  }
+
+  if (threadId === MAIN_THREAD_ID) {
+    if (isReplying || (chat.topics && !chat.topics[GENERAL_TOPIC_ID]?.isClosed)) return undefined;
+    return lang('lng_forum_replies_only');
+  }
+
+  const topic = chat.topics?.[threadId];
+  if (!topic) {
+    return undefined;
+  }
+
+  if (topic.isClosed && !topic.isOwner && !getHasAdminRight(chat, 'manageTopics')) {
+    return lang('TopicClosedByAdmin');
   }
 
   return undefined;
@@ -312,10 +375,18 @@ export function getFolderDescriptionText(lang: LangFn, folder: ApiChatFolder, ch
   }
 }
 
-export function getMessageSenderName(lang: LangFn, chatId: string, sender?: ApiUser) {
+export function getMessageSenderName(lang: LangFn, chatId: string, sender?: ApiUser | ApiChat) {
   if (!sender || isUserId(chatId)) {
     return undefined;
   }
+
+  if (!isUserId(sender.id)) {
+    if (chatId === sender.id) return undefined;
+
+    return (sender as ApiChat).title;
+  }
+
+  sender = sender as ApiUser;
 
   if (sender.isSelf) {
     return lang('FromYou');
@@ -375,4 +446,28 @@ export function filterChatsByName(
 
     return searchWords(getChatTitle(lang, chat, undefined, id === currentUserId));
   });
+}
+
+export function isChatPublic(chat: ApiChat) {
+  return chat.usernames?.some(({ isActive }) => isActive);
+}
+
+export function getOrderedTopics(
+  topics: ApiTopic[], pinnedOrder?: number[], shouldSortByLastMessage = false,
+): ApiTopic[] {
+  if (shouldSortByLastMessage) {
+    return topics.sort((a, b) => b.lastMessageId - a.lastMessageId);
+  } else {
+    const pinned = topics.filter((topic) => topic.isPinned);
+    const ordered = topics
+      .filter((topic) => !topic.isPinned && !topic.isHidden)
+      .sort((a, b) => b.lastMessageId - a.lastMessageId);
+    const hidden = topics.filter((topic) => !topic.isPinned && topic.isHidden)
+      .sort((a, b) => b.lastMessageId - a.lastMessageId);
+
+    const pinnedOrdered = pinnedOrder
+      ? pinnedOrder.map((id) => pinned.find((topic) => topic.id === id)).filter(Boolean) : pinned;
+
+    return [...pinnedOrdered, ...ordered, ...hidden];
+  }
 }

@@ -10,7 +10,8 @@ import type { TextFilter } from './renderText';
 import buildClassName from '../../../util/buildClassName';
 import renderText from './renderText';
 import { copyTextToClipboard } from '../../../util/clipboard';
-import { getTranslation } from '../../../util/langProvider';
+import { translate } from '../../../util/langProvider';
+import { buildCustomEmojiHtmlFromEntity } from '../../middle/composer/helpers/customEmoji';
 
 import MentionLink from '../../middle/message/MentionLink';
 import SafeLink from '../SafeLink';
@@ -24,19 +25,25 @@ interface IOrganizedEntity {
   nestedEntities: IOrganizedEntity[];
 }
 
+const HQ_EMOJI_THRESHOLD = 64;
+
 export function renderTextWithEntities(
   text: string,
   entities?: ApiMessageEntity[],
   highlight?: string,
-  shouldRenderHqEmoji?: boolean,
+  emojiSize?: number,
   shouldRenderAsHtml?: boolean,
   messageId?: number,
   isSimple?: boolean,
   isProtected?: boolean,
-  observeIntersection?: ObserveFn,
+  observeIntersectionForLoading?: ObserveFn,
+  observeIntersectionForPlaying?: ObserveFn,
+  withTranslucentThumbs?: boolean,
+  sharedCanvasRef?: React.RefObject<HTMLCanvasElement>,
+  sharedCanvasHqRef?: React.RefObject<HTMLCanvasElement>,
 ) {
   if (!entities || !entities.length) {
-    return renderMessagePart(text, highlight, shouldRenderHqEmoji, shouldRenderAsHtml, isSimple);
+    return renderMessagePart(text, highlight, emojiSize, shouldRenderAsHtml, isSimple);
   }
 
   const result: TextPart[] = [];
@@ -65,7 +72,7 @@ export function renderTextWithEntities(
       }
       if (textBefore) {
         renderResult.push(...renderMessagePart(
-          textBefore, highlight, shouldRenderHqEmoji, shouldRenderAsHtml, isSimple,
+          textBefore, highlight, emojiSize, shouldRenderAsHtml, isSimple,
         ) as TextPart[]);
       }
     }
@@ -109,7 +116,19 @@ export function renderTextWithEntities(
     const newEntity = shouldRenderAsHtml
       ? processEntityAsHtml(entity, entityContent, nestedEntityContent)
       : processEntity(
-        entity, entityContent, nestedEntityContent, highlight, messageId, isSimple, isProtected, observeIntersection,
+        entity,
+        entityContent,
+        nestedEntityContent,
+        highlight,
+        messageId,
+        isSimple,
+        isProtected,
+        observeIntersectionForLoading,
+        observeIntersectionForPlaying,
+        withTranslucentThumbs,
+        emojiSize,
+        sharedCanvasRef,
+        sharedCanvasHqRef,
       );
 
     if (Array.isArray(newEntity)) {
@@ -127,7 +146,7 @@ export function renderTextWithEntities(
       }
       if (textAfter) {
         renderResult.push(...renderMessagePart(
-          textAfter, highlight, shouldRenderHqEmoji, shouldRenderAsHtml, isSimple,
+          textAfter, highlight, emojiSize, shouldRenderAsHtml, isSimple,
         ) as TextPart[]);
       }
     }
@@ -180,7 +199,7 @@ export function getTextWithEntitiesAsHtml(formattedText?: ApiFormattedText) {
 function renderMessagePart(
   content: TextPart | TextPart[],
   highlight?: string,
-  shouldRenderHqEmoji?: boolean,
+  emojiSize?: number,
   shouldRenderAsHtml?: boolean,
   isSimple?: boolean,
 ) {
@@ -188,7 +207,7 @@ function renderMessagePart(
     const result: TextPart[] = [];
 
     content.forEach((c) => {
-      result.push(...renderMessagePart(c, highlight, shouldRenderHqEmoji, shouldRenderAsHtml, isSimple));
+      result.push(...renderMessagePart(c, highlight, emojiSize, shouldRenderAsHtml, isSimple));
     });
 
     return result;
@@ -198,7 +217,7 @@ function renderMessagePart(
     return renderText(content, ['escape_html', 'emoji_html', 'br_html']);
   }
 
-  const emojiFilter = shouldRenderHqEmoji ? 'hq_emoji' : 'emoji';
+  const emojiFilter = emojiSize && emojiSize > HQ_EMOJI_THRESHOLD ? 'hq_emoji' : 'emoji';
 
   const filters: TextFilter[] = [emojiFilter];
   if (!isSimple) {
@@ -253,7 +272,7 @@ function organizeEntity(
   const parsedNestedEntities = entities
     .filter((e, i) => i > index && e.offset >= offset && e.offset < offset + length)
     .map((e) => organizeEntity(e, entities.indexOf(e), entities, organizedEntityIndexes))
-    .filter<IOrganizedEntity>(Boolean as any);
+    .filter(Boolean);
 
   parsedNestedEntities.forEach((parsedEntity) => {
     let isChanged = false;
@@ -286,7 +305,12 @@ function processEntity(
   messageId?: number,
   isSimple?: boolean,
   isProtected?: boolean,
-  observeIntersection?: ObserveFn,
+  observeIntersectionForLoading?: ObserveFn,
+  observeIntersectionForPlaying?: ObserveFn,
+  withTranslucentThumbs?: boolean,
+  emojiSize?: number,
+  sharedCanvasRef?: React.RefObject<HTMLCanvasElement>,
+  sharedCanvasHqRef?: React.RefObject<HTMLCanvasElement>,
 ) {
   const entityText = typeof entityContent === 'string' && entityContent;
   const renderedContent = nestedEntityContent.length ? nestedEntityContent : entityContent;
@@ -309,9 +333,17 @@ function processEntity(
 
     if (entity.type === ApiMessageEntityTypes.CustomEmoji) {
       return (
-        <CustomEmoji documentId={entity.documentId} observeIntersection={observeIntersection}>
-          {renderNestedMessagePart()}
-        </CustomEmoji>
+        <CustomEmoji
+          documentId={entity.documentId}
+          size={emojiSize}
+          withSharedAnimation
+          sharedCanvasRef={sharedCanvasRef}
+          sharedCanvasHqRef={sharedCanvasHqRef}
+          withGridFix={!emojiSize}
+          observeIntersectionForLoading={observeIntersectionForLoading}
+          observeIntersectionForPlaying={observeIntersectionForPlaying}
+          withTranslucentThumb={withTranslucentThumbs}
+        />
       );
     }
     return text;
@@ -319,15 +351,16 @@ function processEntity(
 
   switch (entity.type) {
     case ApiMessageEntityTypes.Bold:
-      return <strong>{renderNestedMessagePart()}</strong>;
+      return <strong data-entity-type={entity.type}>{renderNestedMessagePart()}</strong>;
     case ApiMessageEntityTypes.Blockquote:
-      return <blockquote>{renderNestedMessagePart()}</blockquote>;
+      return <blockquote data-entity-type={entity.type}>{renderNestedMessagePart()}</blockquote>;
     case ApiMessageEntityTypes.BotCommand:
       return (
         <a
           onClick={handleBotCommandClick}
           className="text-entity-link"
           dir="auto"
+          data-entity-type={entity.type}
         >
           {renderNestedMessagePart()}
         </a>
@@ -338,6 +371,7 @@ function processEntity(
           onClick={handleHashtagClick}
           className="text-entity-link"
           dir="auto"
+          data-entity-type={entity.type}
         >
           {renderNestedMessagePart()}
         </a>
@@ -348,6 +382,7 @@ function processEntity(
           onClick={handleHashtagClick}
           className="text-entity-link"
           dir="auto"
+          data-entity-type={entity.type}
         >
           {renderNestedMessagePart()}
         </a>
@@ -359,6 +394,7 @@ function processEntity(
           onClick={!isProtected ? handleCodeClick : undefined}
           role="textbox"
           tabIndex={0}
+          data-entity-type={entity.type}
         >
           {renderNestedMessagePart()}
         </code>
@@ -371,12 +407,13 @@ function processEntity(
           rel="noopener noreferrer"
           className="text-entity-link"
           dir="auto"
+          data-entity-type={entity.type}
         >
           {renderNestedMessagePart()}
         </a>
       );
     case ApiMessageEntityTypes.Italic:
-      return <em>{renderNestedMessagePart()}</em>;
+      return <em data-entity-type={entity.type}>{renderNestedMessagePart()}</em>;
     case ApiMessageEntityTypes.MentionName:
       return (
         <MentionLink userId={entity.userId}>
@@ -395,6 +432,7 @@ function processEntity(
           href={`tel:${entityText}`}
           className="text-entity-link"
           dir="auto"
+          data-entity-type={entity.type}
         >
           {renderNestedMessagePart()}
         </a>
@@ -402,7 +440,7 @@ function processEntity(
     case ApiMessageEntityTypes.Pre:
       return <CodeBlock text={entityText} language={entity.language} noCopy={isProtected} />;
     case ApiMessageEntityTypes.Strike:
-      return <del>{renderNestedMessagePart()}</del>;
+      return <del data-entity-type={entity.type}>{renderNestedMessagePart()}</del>;
     case ApiMessageEntityTypes.TextUrl:
     case ApiMessageEntityTypes.Url:
       return (
@@ -414,14 +452,22 @@ function processEntity(
         </SafeLink>
       );
     case ApiMessageEntityTypes.Underline:
-      return <ins>{renderNestedMessagePart()}</ins>;
+      return <ins data-entity-type={entity.type}>{renderNestedMessagePart()}</ins>;
     case ApiMessageEntityTypes.Spoiler:
       return <Spoiler messageId={messageId}>{renderNestedMessagePart()}</Spoiler>;
     case ApiMessageEntityTypes.CustomEmoji:
       return (
-        <CustomEmoji documentId={entity.documentId} observeIntersection={observeIntersection}>
-          {renderNestedMessagePart()}
-        </CustomEmoji>
+        <CustomEmoji
+          documentId={entity.documentId}
+          size={emojiSize}
+          withSharedAnimation
+          sharedCanvasRef={sharedCanvasRef}
+          sharedCanvasHqRef={sharedCanvasHqRef}
+          withGridFix={!emojiSize}
+          observeIntersectionForLoading={observeIntersectionForLoading}
+          observeIntersectionForPlaying={observeIntersectionForPlaying}
+          withTranslucentThumb={withTranslucentThumbs}
+        />
       );
     default:
       return renderNestedMessagePart();
@@ -456,7 +502,7 @@ function processEntityAsHtml(
     case ApiMessageEntityTypes.Code:
       return `<code class="text-entity-code">${renderedContent}</code>`;
     case ApiMessageEntityTypes.Pre:
-      return `\`\`\`${entity.language || ''}<br/>${renderedContent}<br/>\`\`\`<br/>`;
+      return `\`\`\`${renderText(entity.language || '', ['escape_html'])}<br/>${renderedContent}<br/>\`\`\`<br/>`;
     case ApiMessageEntityTypes.Strike:
       return `<del>${renderedContent}</del>`;
     case ApiMessageEntityTypes.MentionName:
@@ -480,6 +526,8 @@ function processEntityAsHtml(
         class="spoiler"
         data-entity-type="${ApiMessageEntityTypes.Spoiler}"
         >${renderedContent}</span>`;
+    case ApiMessageEntityTypes.CustomEmoji:
+      return buildCustomEmojiHtmlFromEntity(rawEntityText, entity);
     default:
       return renderedContent;
   }
@@ -502,6 +550,6 @@ function handleHashtagClick(e: React.MouseEvent<HTMLAnchorElement>) {
 function handleCodeClick(e: React.MouseEvent<HTMLElement>) {
   copyTextToClipboard(e.currentTarget.innerText);
   getActions().showNotification({
-    message: getTranslation('TextCopied'),
+    message: translate('TextCopied'),
   });
 }

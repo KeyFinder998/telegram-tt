@@ -4,6 +4,8 @@ import type { OwnProps as AnimatedIconProps } from './AnimatedIcon';
 import type { ApiSticker } from '../../api/types';
 import { ApiMediaFormat } from '../../api/types';
 
+import { getStickerPreviewHash } from '../../global/helpers';
+
 import useMedia from '../../hooks/useMedia';
 
 import AnimatedIconWithPreview from './AnimatedIconWithPreview';
@@ -18,9 +20,9 @@ function AnimatedIconFromSticker(props: OwnProps) {
   } = props;
 
   const thumbDataUri = sticker?.thumbnail?.dataUri;
-  const localMediaHash = `sticker${sticker?.id}`;
+  const localMediaHash = sticker && `sticker${sticker.id}`;
   const previewBlobUrl = useMedia(
-    sticker ? `${localMediaHash}?size=m` : undefined,
+    sticker ? getStickerPreviewHash(sticker.id) : undefined,
     noLoad && !forcePreview,
     ApiMediaFormat.BlobUrl,
     lastSyncTime,
@@ -31,7 +33,6 @@ function AnimatedIconFromSticker(props: OwnProps) {
     <AnimatedIconWithPreview
       tgsUrl={tgsUrl}
       previewUrl={previewBlobUrl}
-      noPreviewTransition
       thumbDataUri={thumbDataUri}
       // eslint-disable-next-line react/jsx-props-no-spreading
       {...otherProps}

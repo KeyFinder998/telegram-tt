@@ -22,10 +22,12 @@ import Message from './message/Message';
 import SponsoredMessage from './message/SponsoredMessage';
 import ActionMessage from './ActionMessage';
 import { getActions } from '../../global';
+import { MAIN_THREAD_ID } from '../../api/types';
 
 interface OwnProps {
   isCurrentUserPremium?: boolean;
   chatId: string;
+  threadId: number;
   messageIds: number[];
   messageGroups: MessageDateGroup[];
   isViewportNewest: boolean;
@@ -36,10 +38,8 @@ interface OwnProps {
   anchorIdRef: { current: string | undefined };
   memoUnreadDividerBeforeIdRef: { current: number | undefined };
   memoFirstUnreadIdRef: { current: number | undefined };
-  threadId: number;
   type: MessageListType;
   isReady: boolean;
-  areReactionsInMeta: boolean;
   isScrollingRef: { current: boolean | undefined };
   isScrollPatchNeededRef: { current: boolean | undefined };
   threadTopMessageId: number | undefined;
@@ -55,18 +55,17 @@ const UNREAD_DIVIDER_CLASS = 'unread-divider';
 const MessageListContent: FC<OwnProps> = ({
   isCurrentUserPremium,
   chatId,
+  threadId,
   messageIds,
   messageGroups,
   isViewportNewest,
   isUnread,
   withUsers,
-  areReactionsInMeta,
   noAvatars,
   containerRef,
   anchorIdRef,
   memoUnreadDividerBeforeIdRef,
   memoFirstUnreadIdRef,
-  threadId,
   type,
   isReady,
   isScrollingRef,
@@ -81,9 +80,9 @@ const MessageListContent: FC<OwnProps> = ({
   const { openHistoryCalendar } = getActions();
 
   const {
-    observeIntersectionForMedia,
     observeIntersectionForReading,
-    observeIntersectionForAnimatedStickers,
+    observeIntersectionForLoading,
+    observeIntersectionForPlaying,
   } = useMessageObservers(type, containerRef, memoFirstUnreadIdRef);
 
   const {
@@ -143,8 +142,10 @@ const MessageListContent: FC<OwnProps> = ({
           <ActionMessage
             key={message.id}
             message={message}
-            observeIntersection={observeIntersectionForReading}
-            observeIntersectionForAnimation={observeIntersectionForAnimatedStickers}
+            isInsideTopic={Boolean(threadId && threadId !== MAIN_THREAD_ID)}
+            observeIntersectionForReading={observeIntersectionForReading}
+            observeIntersectionForLoading={observeIntersectionForLoading}
+            observeIntersectionForPlaying={observeIntersectionForPlaying}
             memoFirstUnreadIdRef={memoFirstUnreadIdRef}
             appearanceOrder={messageCountToAnimate - ++appearanceIndex}
             isLastInList={isLastInList}
@@ -195,13 +196,12 @@ const MessageListContent: FC<OwnProps> = ({
             key={key}
             message={message}
             observeIntersectionForBottom={observeIntersectionForReading}
-            observeIntersectionForMedia={observeIntersectionForMedia}
-            observeIntersectionForAnimatedStickers={observeIntersectionForAnimatedStickers}
+            observeIntersectionForLoading={observeIntersectionForLoading}
+            observeIntersectionForPlaying={observeIntersectionForPlaying}
             album={album}
             noAvatars={noAvatars}
             withAvatar={position.isLastInGroup && withUsers && !isOwn && !(message.id === threadTopMessageId)}
             withSenderName={position.isFirstInGroup && withUsers && !isOwn}
-            areReactionsInMeta={areReactionsInMeta}
             threadId={threadId}
             messageListType={type}
             noComments={hasLinkedChat === false}

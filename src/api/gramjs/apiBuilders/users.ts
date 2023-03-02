@@ -1,17 +1,21 @@
 import { Api as GramJs } from '../../../lib/gramjs';
 import type {
+  ApiEmojiStatus,
   ApiPremiumGiftOption,
-  ApiUser, ApiUserStatus, ApiUserType,
+  ApiUser,
+  ApiUserStatus,
+  ApiUserType,
 } from '../../types';
 import { buildApiPeerId } from './peers';
 import { buildApiBotInfo } from './bots';
-import { buildApiPhoto } from './common';
+import { buildApiPhoto, buildApiUsernames } from './common';
 
 export function buildApiUserFromFull(mtpUserFull: GramJs.users.UserFull): ApiUser {
   const {
     fullUser: {
       about, commonChatsCount, pinnedMsgId, botInfo, blocked,
       profilePhoto, voiceMessagesForbidden, premiumGifts,
+      fallbackPhoto, personalPhoto,
     },
     users,
   } = mtpUserFull;
@@ -22,6 +26,8 @@ export function buildApiUserFromFull(mtpUserFull: GramJs.users.UserFull): ApiUse
     ...user,
     fullInfo: {
       ...(profilePhoto instanceof GramJs.Photo && { profilePhoto: buildApiPhoto(profilePhoto) }),
+      ...(fallbackPhoto instanceof GramJs.Photo && { fallbackPhoto: buildApiPhoto(fallbackPhoto) }),
+      ...(personalPhoto instanceof GramJs.Photo && { personalPhoto: buildApiPhoto(personalPhoto) }),
       bio: about,
       commonChatsCount,
       pinnedMessageId: pinnedMsgId,
@@ -48,6 +54,8 @@ export function buildApiUser(mtpUser: GramJs.TypeUser): ApiUser | undefined {
     ? String(mtpUser.photo.photoId)
     : undefined;
   const userType = buildApiUserType(mtpUser);
+  const usernames = buildApiUsernames(mtpUser);
+  const emojiStatus = mtpUser.emojiStatus ? buildApiUserEmojiStatus(mtpUser.emojiStatus) : undefined;
 
   return {
     id: buildApiPeerId(id, 'user'),
@@ -61,14 +69,15 @@ export function buildApiUser(mtpUser: GramJs.TypeUser): ApiUser | undefined {
     ...(firstName && { firstName }),
     ...(userType === 'userTypeBot' && { canBeInvitedToGroup: !mtpUser.botNochats }),
     ...(lastName && { lastName }),
-    username: mtpUser.username || '',
+    ...(usernames && { usernames }),
     phoneNumber: mtpUser.phone || '',
     noStatus: !mtpUser.status,
     ...(mtpUser.accessHash && { accessHash: String(mtpUser.accessHash) }),
     ...(avatarHash && { avatarHash }),
+    emojiStatus,
     hasVideoAvatar,
     ...(mtpUser.bot && mtpUser.botInlinePlaceholder && { botPlaceholder: mtpUser.botInlinePlaceholder }),
-    ...(mtpUser.bot && mtpUser.botAttachMenu && { isAttachMenuBot: mtpUser.botAttachMenu }),
+    ...(mtpUser.bot && mtpUser.botAttachMenu && { isAttachBot: mtpUser.botAttachMenu }),
   };
 }
 
@@ -97,6 +106,18 @@ export function buildApiUserStatus(mtpStatus?: GramJs.TypeUserStatus): ApiUserSt
   } else {
     return { type: 'userStatusLastMonth' };
   }
+}
+
+export function buildApiUserEmojiStatus(mtpEmojiStatus: GramJs.TypeEmojiStatus): ApiEmojiStatus | undefined {
+  if (mtpEmojiStatus instanceof GramJs.EmojiStatus) {
+    return { documentId: mtpEmojiStatus.documentId.toString() };
+  }
+
+  if (mtpEmojiStatus instanceof GramJs.EmojiStatusUntil) {
+    return { documentId: mtpEmojiStatus.documentId.toString(), until: mtpEmojiStatus.until };
+  }
+
+  return undefined;
 }
 
 export function buildApiUsersAndStatuses(mtpUsers: GramJs.TypeUser[]) {

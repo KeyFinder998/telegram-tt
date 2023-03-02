@@ -9,9 +9,9 @@
       bottom: 0;
       left: 4.5rem;
       right: 0;
+      height: 0.0625rem;
       /* stylelint-disable-next-line plugin/whole-pixel */
-      height: 0.5px;
-      background: var(--color-dividers);
+      box-shadow: inset 0 -0.03125rem 0 0 var(--color-dividers);
     }
 
     &.small-icon::after {
@@ -23,11 +23,10 @@
     }
   }
 
-  // Using half-pixel height is efficient on iOS but not supported on Android, so `transform` is used instead
   body.is-android & {
     &:not(:last-of-type)::after {
-      height: 0.0625rem;
-      transform: scaleY(0.25);
+      /* stylelint-disable-next-line plugin/whole-pixel */
+      box-shadow: inset 0 -0.03125rem 0 0 var(--color-dividers-android);
     }
   }
 
@@ -47,19 +46,37 @@
     border-radius: var(--border-radius-default);
     --ripple-color: rgba(0, 0, 0, 0.08);
 
+    text-decoration: none;
+
     > i {
       font-size: 1.5rem;
       margin-right: 2rem;
       color: var(--color-text-secondary);
+    }
+
+    > .Switcher {
+      margin-left: auto;
     }
   }
 
   .user-status,
   .group-status,
   .title,
+  .other-usernames,
   .subtitle {
     text-align: initial;
     unicode-bidi: plaintext;
+  }
+
+  .other-usernames {
+    display: block;
+    white-space: normal;
+    line-height: 1.25rem;
+  }
+
+  .username-link {
+    position: relative;
+    z-index: 2;
   }
 
   &.multiline {
@@ -86,7 +103,6 @@
       }
 
       @media (hover: hover) {
-
         &:hover,
         &:focus {
           --background-color: var(--color-chat-hover);
@@ -173,12 +189,23 @@
       overflow: hidden;
     }
 
+    .info-name-title {
+      display: flex;
+      align-items: center;
+    }
+
+    .info-row,
     .title,
     .subtitle {
       overflow: hidden;
       display: flex;
       justify-content: flex-start;
       align-items: center;
+    }
+
+    .separator {
+      flex-grow: 1;
+      min-width: 0.5rem;
     }
 
     h3,
@@ -198,21 +225,6 @@
       h3 {
         font-weight: 500;
       }
-
-      .VerifiedIcon {
-        margin-left: 0.5rem;
-      }
-
-      .PremiumIcon,
-      .VerifiedIcon {
-        margin-left: 0.25rem;
-      }
-
-      .emoji {
-        vertical-align: text-bottom;
-        background-position: 0 0;
-        flex-shrink: 0;
-      }
     }
 
     .contact-phone,
@@ -227,6 +239,17 @@
       align-items: center;
       flex-grow: 1;
       overflow: hidden;
+
+      .custom-title {
+        padding-inline-start: 1rem;
+        font-size: 0.875rem;
+        color: var(--color-text-secondary);
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        margin-inline-start: auto;
+        flex-shrink: 0;
+      }
 
       .status,
       .typing-status {
@@ -289,7 +312,12 @@
 
   &.search-result-message {
     .title {
+      flex-grow: 1;
       padding-right: 0.125rem;
+    }
+
+    .search-result-message-top {
+      display: flex;
     }
 
     h3 {
@@ -305,11 +333,6 @@
       text-overflow: ellipsis;
       text-align: left;
       display: block;
-    }
-
-    .LastMessageMeta {
-      margin-left: auto;
-      margin-right: 0;
     }
 
     .subtitle {

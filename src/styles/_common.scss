@@ -4,8 +4,12 @@
 .media-inner {
   position: relative;
 
-  video,
-  img {
+  video.full-media,
+  img.full-media,
+  img.thumbnail,
+  canvas.thumbnail {
+    width: 100%;
+    height: 100%;
     display: block;
     object-fit: cover;
   }
@@ -15,8 +19,12 @@
     background-size: contain;
   }
 
-  .thumbnail ~ .thumbnail,
-  .thumbnail ~ .full-media,
+  .thumbnail {
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+
   .media-loading {
     position: absolute;
   }
@@ -80,6 +88,21 @@
     @include overflow-y-overlay();
   }
 
+  &.forum-panel-open {
+    .info {
+      transform: translateX(-25%);
+      opacity: 0;
+    }
+
+    .Chat[dir="rtl"] .info {
+      transform: translateX(25%);
+    }
+
+    .ListItem-button {
+      height: 4.5rem;
+    }
+  }
+
   .scroll-container {
     position: relative;
   }
@@ -101,7 +124,7 @@
 }
 
 // Used by Avatar and ProfilePhoto components
-div {
+.Avatar, .ProfilePhoto {
   &.color-bg-1 {
     --color-user: var(--color-user-1);
   }
@@ -136,6 +159,6 @@ div {
   }
 
   &.deleted-account {
-    --color-user: var(--color-gray);
+    --color-user: #9eaab5;
   }
 }

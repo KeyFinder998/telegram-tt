@@ -1,4 +1,8 @@
 import { getActions } from '../global';
+
+import type { ApiChatType } from '../api/types';
+
+import { API_CHAT_TYPES } from '../config';
 import { IS_SAFARI } from './environment';
 
 type DeepLinkMethod = 'resolve' | 'login' | 'passport' | 'settings' | 'join' | 'addstickers' | 'addemoji' |
@@ -20,39 +24,47 @@ export const processDeepLink = (url: string) => {
     focusMessage,
     joinVoiceChatByLink,
     openInvoice,
+    processAttachBotParameters,
+    openChatWithDraft,
   } = getActions();
 
   // Safari thinks the path in tg://path links is hostname for some reason
   const method = (IS_SAFARI ? hostname : pathname).replace(/^\/\//, '') as DeepLinkMethod;
-  const params: Record<string, string> = {};
-  searchParams.forEach((value, key) => {
-    params[key] = value;
-  });
+  const params = Object.fromEntries(searchParams);
 
   switch (method) {
     case 'resolve': {
       const {
-        domain, phone, post, comment, voicechat, livestream, start, startattach, attach,
+        domain, phone, post, comment, voicechat, livestream, start, startattach, attach, thread, topic,
       } = params;
 
       const startAttach = params.hasOwnProperty('startattach') && !startattach ? true : startattach;
+      const choose = parseChooseParameter(params.choose);
+      const threadId = Number(thread) || Number(topic) || undefined;
 
       if (domain !== 'telegrampassport') {
-        if (params.hasOwnProperty('voicechat') || params.hasOwnProperty('livestream')) {
+        if (startAttach && choose) {
+          processAttachBotParameters({
+            username: domain,
+            filter: choose,
+            ...(typeof startAttach === 'string' && { startParam: startAttach }),
+          });
+        } else if (params.hasOwnProperty('voicechat') || params.hasOwnProperty('livestream')) {
           joinVoiceChatByLink({
             username: domain,
             inviteHash: voicechat || livestream,
           });
         } else if (phone) {
-          openChatByPhoneNumber({ phone, startAttach, attach });
+          openChatByPhoneNumber({ phoneNumber: phone, startAttach, attach });
         } else {
           openChatByUsername({
             username: domain,
-            messageId: Number(post),
-            commentId: Number(comment),
+            messageId: post ? Number(post) : undefined,
+            commentId: comment ? Number(comment) : undefined,
             startParam: start,
             startAttach,
             attach,
+            threadId,
           });
         }
       }
@@ -65,7 +77,7 @@ export const processDeepLink = (url: string) => {
 
       focusMessage({
         chatId: `-${channel}`,
-        id: post,
+        messageId: Number(post),
       });
       break;
     }
@@ -93,8 +105,10 @@ export const processDeepLink = (url: string) => {
       break;
     }
     case 'share':
-    case 'msg': {
-      // const { url, text } = params;
+    case 'msg':
+    case 'msg_url': {
+      const { url: urlParam, text } = params;
+      openChatWithDraft({ text: formatShareText(urlParam, text) });
       break;
     }
     case 'login': {
@@ -113,3 +127,13 @@ export const processDeepLink = (url: string) => {
       break;
   }
 };
+
+export function parseChooseParameter(choose?: string) {
+  if (!choose) return undefined;
+  const types = choose.toLowerCase().split(' ');
+  return types.filter((type): type is ApiChatType => API_CHAT_TYPES.includes(type as ApiChatType));
+}
+
+export function formatShareText(url?: string, text?: string, title?: string): string {
+  return [url, title, text].filter(Boolean).join('\n');
+}

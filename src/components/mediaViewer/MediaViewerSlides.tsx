@@ -19,6 +19,8 @@ import useLang from '../../hooks/useLang';
 import usePrevious from '../../hooks/usePrevious';
 import useTimeout from '../../hooks/useTimeout';
 import useWindowSize from '../../hooks/useWindowSize';
+import useHistoryBack from '../../hooks/useHistoryBack';
+import { useFullscreenStatus } from '../../hooks/useFullscreen';
 
 import MediaViewerContent from './MediaViewerContent';
 
@@ -40,6 +42,7 @@ type OwnProps = {
   origin?: MediaViewerOrigin;
   animationLevel: AnimationLevel;
   onClose: () => void;
+  isHidden?: boolean;
   hasFooter?: boolean;
   onFooterClick: () => void;
   zoomLevelChange: number;
@@ -82,6 +85,7 @@ const MediaViewerSlides: FC<OwnProps> = ({
   hasFooter,
   zoomLevelChange,
   animationLevel,
+  isHidden,
   ...rest
 }) => {
   // eslint-disable-next-line no-null/no-null
@@ -98,18 +102,25 @@ const MediaViewerSlides: FC<OwnProps> = ({
   const hasZoomChanged = prevZoomLevelChange !== undefined && prevZoomLevelChange !== zoomLevelChange;
   const forceUpdate = useForceUpdate();
   const [areControlsVisible, setControlsVisible] = useState(false);
+  const isFullscreen = useFullscreenStatus();
   const [isMouseDown, setIsMouseDown] = useState(false);
   const { height: windowHeight, width: windowWidth, isResizing } = useWindowSize();
   const { onClose } = rest;
 
   const lang = useLang();
 
+  useHistoryBack({
+    isActive: isOpen,
+    onBack: onClose,
+    shouldBeReplaced: true,
+  });
+
   const setTransform = useCallback((value: Transform) => {
     transformRef.current = value;
     forceUpdate();
   }, [forceUpdate]);
 
-  const selectMediaDebounced = useDebouncedCallback(selectMedia, [], DEBOUNCE_MESSAGE, true);
+  const selectMediaDebounced = useDebouncedCallback(selectMedia, [selectMedia], DEBOUNCE_MESSAGE, true);
   const clearSwipeDirectionDebounced = useDebouncedCallback(() => {
     swipeDirectionRef.current = undefined;
   }, [], DEBOUNCE_SWIPE, true);
@@ -132,7 +143,11 @@ const MediaViewerSlides: FC<OwnProps> = ({
   useTimeout(() => setControlsVisible(true), ANIMATION_DURATION + 100);
 
   useEffect(() => {
-    if (!containerRef.current || activeMediaId === undefined) {
+    setActiveMediaId(mediaId);
+  }, [mediaId]);
+
+  useEffect(() => {
+    if (!containerRef.current || activeMediaId === undefined || isHidden || isFullscreen) {
       return undefined;
     }
     let lastTransform = lastTransformRef.current;
@@ -370,7 +385,7 @@ const MediaViewerSlides: FC<OwnProps> = ({
         onUpdate: (value) => setTransform({
           y: 0,
           x: value,
-          scale: transformRef.current.scale,
+          scale: transformRef.current?.scale ?? 1,
         }),
       });
     };
@@ -539,6 +554,7 @@ const MediaViewerSlides: FC<OwnProps> = ({
         setTransform(transform);
       },
       onClick(e) {
+        setIsMouseDown(false);
         const [isInThreshold, hasNextSlide] = changeSlideOnClick(e as MouseEvent);
         if (isInThreshold) {
           e.preventDefault();
@@ -617,10 +633,12 @@ const MediaViewerSlides: FC<OwnProps> = ({
     clearSwipeDirectionDebounced,
     animationLevel,
     setIsMouseDown,
+    isHidden,
+    isFullscreen,
   ]);
 
   useEffect(() => {
-    if (!containerRef.current || !hasZoomChanged) return;
+    if (!containerRef.current || !hasZoomChanged || isHidden || isFullscreen) return;
     const { scale } = transformRef.current;
     const dir = zoomLevelChange > 0 ? -1 : +1;
     const minZoom = MIN_ZOOM * 0.6;
@@ -648,7 +666,7 @@ const MediaViewerSlides: FC<OwnProps> = ({
         containerRef.current.dispatchEvent(wheelEvent);
       },
     });
-  }, [zoomLevelChange, hasZoomChanged]);
+  }, [zoomLevelChange, hasZoomChanged, isHidden, isFullscreen]);
 
   if (activeMediaId === undefined) return undefined;
 
@@ -659,6 +677,7 @@ const MediaViewerSlides: FC<OwnProps> = ({
   const offsetX = transformRef.current.x;
   const offsetY = transformRef.current.y;
   const { scale } = transformRef.current;
+  const isMoving = isMouseDown && scale > 1;
 
   return (
     <div className="MediaViewerSlides" ref={containerRef}>
@@ -668,6 +687,7 @@ const MediaViewerSlides: FC<OwnProps> = ({
             /* eslint-disable-next-line react/jsx-props-no-spreading */
             {...rest}
             animationLevel={animationLevel}
+            isMoving={isMoving}
             areControlsVisible={areControlsVisible}
             mediaId={prevMediaId}
           />
@@ -677,7 +697,7 @@ const MediaViewerSlides: FC<OwnProps> = ({
         className={buildClassName(
           'MediaViewerSlide',
           'MediaViewerSlide--active',
-          isMouseDown && scale > 1 && 'MediaViewerSlide--moving',
+          isMoving && 'MediaViewerSlide--moving',
         )}
         onClick={handleControlsVisibility}
         ref={activeSlideRef}
@@ -690,6 +710,7 @@ const MediaViewerSlides: FC<OwnProps> = ({
           animationLevel={animationLevel}
           isActive={isActiveRef.current}
           setControlsVisible={setControlsVisible}
+          isMoving={isMoving}
           areControlsVisible={areControlsVisible && scale === 1}
         />
       </div>
@@ -699,6 +720,7 @@ const MediaViewerSlides: FC<OwnProps> = ({
             /* eslint-disable-next-line react/jsx-props-no-spreading */
             {...rest}
             animationLevel={animationLevel}
+            isMoving={isMoving}
             areControlsVisible={areControlsVisible}
             mediaId={nextMediaId}
           />

@@ -1,13 +1,20 @@
 import { DEBUG } from './config';
 import { respondForProgressive } from './serviceWorker/progressive';
 import { respondForDownload } from './serviceWorker/download';
-import { respondWithCache, clearAssetCache } from './serviceWorker/assetCache';
-import { handlePush, handleNotificationClick, handleClientMessage } from './serviceWorker/pushNotification';
+import { respondWithCache, clearAssetCache, respondWithCacheNetworkFirst } from './serviceWorker/assetCache';
+import {
+  handlePush,
+  handleNotificationClick,
+  handleClientMessage as handleNotificationMessage,
+} from './serviceWorker/pushNotification';
+import { respondForShare, handleClientMessage as handleShareMessage } from './serviceWorker/share';
+
 import { pause } from './util/schedulers';
 
 declare const self: ServiceWorkerGlobalScope;
 
-const ASSET_CACHE_PATTERN = /[\da-f]{20}.*\.(js|css|woff2?|svg|png|jpg|jpeg|tgs|json|wasm)$/;
+const NETWORK_FIRST_ASSETS = new Set(['/', '/rlottie-wasm.wasm', '/webp_wasm.wasm']);
+const RE_CACHE_FIRST_ASSETS = /[\da-f]{20}.*\.(js|css|woff2?|svg|png|jpg|jpeg|tgs|json|wasm)$/;
 const ACTIVATE_TIMEOUT = 3000;
 
 self.addEventListener('install', (e) => {
@@ -52,9 +59,20 @@ self.addEventListener('fetch', (e: FetchEvent) => {
     return true;
   }
 
-  if (url.startsWith('http') && url.match(ASSET_CACHE_PATTERN)) {
-    e.respondWith(respondWithCache(e));
-    return true;
+  if (url.includes('/share/')) {
+    e.respondWith(respondForShare(e));
+  }
+
+  if (url.startsWith('http')) {
+    if (NETWORK_FIRST_ASSETS.has(new URL(url).pathname)) {
+      e.respondWith(respondWithCacheNetworkFirst(e));
+      return true;
+    }
+
+    if (url.match(RE_CACHE_FIRST_ASSETS)) {
+      e.respondWith(respondWithCache(e));
+      return true;
+    }
   }
 
   return false;
@@ -62,4 +80,7 @@ self.addEventListener('fetch', (e: FetchEvent) => {
 
 self.addEventListener('push', handlePush);
 self.addEventListener('notificationclick', handleNotificationClick);
-self.addEventListener('message', handleClientMessage);
+self.addEventListener('message', (event) => {
+  handleNotificationMessage(event);
+  handleShareMessage(event);
+});

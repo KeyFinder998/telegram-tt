@@ -9,6 +9,11 @@
     overflow-x: hidden;
   }
 
+  .personal-photo {
+    margin-right: 2rem;
+    transform: scale(1.25);
+  }
+
   .section {
     padding: 1rem 1.5rem;
     background-color: var(--color-background);
@@ -104,6 +109,10 @@
     .section-info {
       color: var(--color-text-secondary);
       font-size: 0.875rem;
+    }
+
+    .section-info_push {
+      margin-top: 0.5rem;
     }
 
     &[dir="rtl"] {

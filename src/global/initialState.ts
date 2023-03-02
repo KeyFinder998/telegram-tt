@@ -1,4 +1,4 @@
-import type { GlobalState } from './types';
+import type { TabState, GlobalState } from './types';
 import { NewChatMembersProgress } from '../types';
 
 import {
@@ -9,13 +9,21 @@ import {
 } from '../config';
 import { IS_IOS, IS_MAC_OS } from '../util/environment';
 
-export const INITIAL_STATE: GlobalState = {
-  isLeftColumnShown: true,
-  isChatInfoShown: false,
-  newChatMembersProgress: NewChatMembersProgress.Closed,
-  uiReadyState: 0,
+export const INITIAL_GLOBAL_STATE: GlobalState = {
+  attachMenu: { bots: {} },
+  blurredTabTokens: [],
+  passcode: {},
+  twoFaSettings: {},
   serverTimeOffset: 0,
   isUpdateAvailable: false,
+
+  audioPlayer: {
+    lastPlaybackRate: DEFAULT_PLAYBACK_RATE,
+  },
+
+  mediaViewer: {
+    lastPlaybackRate: DEFAULT_PLAYBACK_RATE,
+  },
 
   authRememberMe: true,
   countryList: {
@@ -43,12 +51,16 @@ export const INITIAL_STATE: GlobalState = {
 
   messages: {
     byChatId: {},
-    messageLists: [],
     sponsoredByChatId: {},
   },
 
   groupCalls: {
     byId: {},
+  },
+
+  attachmentSettings: {
+    shouldCompress: true,
+    shouldSendGrouped: true,
   },
 
   scheduledMessages: {
@@ -57,7 +69,6 @@ export const INITIAL_STATE: GlobalState = {
 
   chatFolders: {
     byId: {},
-    activeChatFolder: 0,
   },
 
   fileUploads: {
@@ -88,7 +99,6 @@ export const INITIAL_STATE: GlobalState = {
     featured: {
       setIds: [],
     },
-    search: {},
     forEmoji: {},
   },
 
@@ -96,61 +106,19 @@ export const INITIAL_STATE: GlobalState = {
     lastRendered: [],
     byId: {},
     added: {},
+    forEmoji: {},
+    statusRecent: {},
   },
 
   emojiKeywords: {},
 
   gifs: {
     saved: {},
-    search: {},
-  },
-
-  inlineBots: {
-    isLoading: false,
-    byUsername: {},
-  },
-
-  globalSearch: {},
-
-  userSearch: {},
-
-  localTextSearch: {
-    byChatThreadKey: {},
-  },
-
-  localMediaSearch: {
-    byChatId: {},
-  },
-
-  management: {
-    byChatId: {},
   },
 
   topPeers: {},
 
   topInlineBots: {},
-
-  mediaViewer: {
-    volume: DEFAULT_VOLUME,
-    playbackRate: DEFAULT_PLAYBACK_RATE,
-    isMuted: false,
-  },
-
-  audioPlayer: {
-    volume: DEFAULT_VOLUME,
-    playbackRate: DEFAULT_PLAYBACK_RATE,
-    isMuted: false,
-  },
-
-  forwardMessages: {},
-
-  pollResults: {},
-
-  payment: {},
-
-  notifications: [],
-
-  dialogs: [],
 
   activeSessions: {
     byHash: {},
@@ -190,6 +158,7 @@ export const INITIAL_STATE: GlobalState = {
       canAutoPlayGifs: true,
       canAutoPlayVideos: true,
       shouldSuggestStickers: true,
+      shouldSuggestCustomEmoji: true,
       shouldLoopStickers: true,
       language: 'en',
       timeFormat: '24h',
@@ -211,8 +180,73 @@ export const INITIAL_STATE: GlobalState = {
     notifyExceptions: {},
   },
 
-  twoFaSettings: {},
-  passcode: {},
+  serviceNotifications: [],
+  trustedBotIds: [],
+
+  transcriptions: {},
+
+  byTabId: {},
+};
+
+export const INITIAL_TAB_STATE: TabState = {
+  id: 0,
+  isMasterTab: false,
+  isLeftColumnShown: true,
+  isChatInfoShown: false,
+  newChatMembersProgress: NewChatMembersProgress.Closed,
+  uiReadyState: 0,
+  shouldInit: true,
+
+  gifSearch: {},
+  stickerSearch: {},
+
+  messageLists: [],
+  activeChatFolder: 0,
+  tabThreads: {},
+
+  inlineBots: {
+    isLoading: false,
+    byUsername: {},
+  },
+
+  globalSearch: {},
+
+  userSearch: {},
+
+  localTextSearch: {
+    byChatThreadKey: {},
+  },
+
+  localMediaSearch: {
+    byChatThreadKey: {},
+  },
+
+  management: {
+    byChatId: {},
+  },
+
+  mediaViewer: {
+    volume: DEFAULT_VOLUME,
+    playbackRate: DEFAULT_PLAYBACK_RATE,
+    isMuted: false,
+  },
+
+  audioPlayer: {
+    volume: DEFAULT_VOLUME,
+    playbackRate: DEFAULT_PLAYBACK_RATE,
+    isMuted: false,
+  },
+
+  forwardMessages: {},
+
+  pollResults: {},
+
+  payment: {},
+
+  notifications: [],
+
+  dialogs: [],
+
   activeReactions: {},
 
   shouldShowContextMenuHint: true,
@@ -221,8 +255,6 @@ export const INITIAL_STATE: GlobalState = {
     byChatId: {},
   },
 
-  serviceNotifications: [],
-
   statistics: {
     byChatId: {},
   },
@@ -230,12 +262,4 @@ export const INITIAL_STATE: GlobalState = {
   pollModal: {
     isOpen: false,
   },
-
-  trustedBotIds: [],
-
-  attachMenu: {
-    bots: {},
-  },
-
-  transcriptions: {},
 };

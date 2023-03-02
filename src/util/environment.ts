@@ -1,8 +1,4 @@
 import {
-  MIN_SCREEN_WIDTH_FOR_STATIC_LEFT_COLUMN,
-  MOBILE_SCREEN_MAX_WIDTH,
-  MOBILE_SCREEN_LANDSCAPE_MAX_HEIGHT,
-  MOBILE_SCREEN_LANDSCAPE_MAX_WIDTH,
   IS_TEST,
   SUPPORTED_VIDEO_CONTENT_TYPES,
   VIDEO_MOV_TYPE,
@@ -21,10 +17,12 @@ export function getPlatform() {
   const iosPlatforms = ['iPhone', 'iPad', 'iPod'];
   let os: 'macOS' | 'iOS' | 'Windows' | 'Android' | 'Linux' | undefined;
 
-  if (macosPlatforms.indexOf(platform) !== -1) {
-    os = 'macOS';
-  } else if (iosPlatforms.indexOf(platform) !== -1) {
+  if (iosPlatforms.indexOf(platform) !== -1
+    // For new IPads with M1 chip and IPadOS platform returns "MacIntel"
+    || (platform === 'MacIntel' && ('maxTouchPoints' in navigator && navigator.maxTouchPoints > 2))) {
     os = 'iOS';
+  } else if (macosPlatforms.indexOf(platform) !== -1) {
+    os = 'macOS';
   } else if (windowsPlatforms.indexOf(platform) !== -1) {
     os = 'Windows';
   } else if (/Android/.test(userAgent)) {
@@ -42,6 +40,16 @@ export const IS_MAC_OS = PLATFORM_ENV === 'macOS';
 export const IS_IOS = PLATFORM_ENV === 'iOS';
 export const IS_ANDROID = PLATFORM_ENV === 'Android';
 export const IS_SAFARI = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+export const IS_YA_BROWSER = navigator.userAgent.includes('YaBrowser');
+
+export enum MouseButton {
+  Main = 0,
+  Auxiliary = 1,
+  Secondary = 2,
+  Fourth = 3,
+  Fifth = 4,
+}
+
 export const IS_PWA = (
   window.matchMedia('(display-mode: standalone)').matches
   || (window.navigator as any).standalone
@@ -49,14 +57,6 @@ export const IS_PWA = (
 );
 
 export const IS_TOUCH_ENV = window.matchMedia('(pointer: coarse)').matches;
-// Keep in mind the landscape orientation
-export const IS_SINGLE_COLUMN_LAYOUT = window.innerWidth <= MOBILE_SCREEN_MAX_WIDTH || (
-  window.innerWidth <= MOBILE_SCREEN_LANDSCAPE_MAX_WIDTH && window.innerHeight <= MOBILE_SCREEN_LANDSCAPE_MAX_HEIGHT
-);
-// Special layout, 1 column while chat opened, 2 columns while collapsed
-export const IS_TABLET_COLUMN_LAYOUT = !IS_SINGLE_COLUMN_LAYOUT && (
-  window.innerWidth <= MIN_SCREEN_WIDTH_FOR_STATIC_LEFT_COLUMN
-);
 export const IS_VOICE_RECORDING_SUPPORTED = Boolean(
   window.navigator.mediaDevices && 'getUserMedia' in window.navigator.mediaDevices && (
     window.AudioContext || (window as any).webkitAudioContext
@@ -106,12 +106,13 @@ if (IS_OPFS_SUPPORTED) {
   })();
 }
 
-export const IS_BACKDROP_BLUR_SUPPORTED = !IS_TEST && (
-  CSS.supports('backdrop-filter: blur()') || CSS.supports('-webkit-backdrop-filter: blur()')
-);
+export const IS_OFFSET_PATH_SUPPORTED = CSS.supports('offset-rotate: 0deg');
+export const IS_BACKDROP_BLUR_SUPPORTED = CSS.supports('backdrop-filter: blur()')
+  || CSS.supports('-webkit-backdrop-filter: blur()');
 export const IS_COMPACT_MENU = !IS_TOUCH_ENV;
 export const IS_SCROLL_PATCH_NEEDED = !IS_MAC_OS && !IS_IOS && !IS_ANDROID;
 export const IS_INSTALL_PROMPT_SUPPORTED = 'onbeforeinstallprompt' in window;
+export const IS_MULTITAB_SUPPORTED = 'BroadcastChannel' in window;
 
 // Smaller area reduces scroll jumps caused by `patchChromiumScroll`
 export const MESSAGE_LIST_SENSITIVE_AREA = IS_SCROLL_PATCH_NEEDED ? 300 : 750;

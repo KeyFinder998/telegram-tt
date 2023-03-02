@@ -1,4 +1,6 @@
-import React, { useMemo, memo, useRef } from '../../lib/teact/teact';
+import React, {
+  useMemo, memo, useRef, useEffect, useCallback,
+} from '../../lib/teact/teact';
 import { getActions, getGlobal, withGlobal } from '../../global';
 
 import type { FC } from '../../lib/teact/teact';
@@ -13,21 +15,20 @@ import {
   selectCurrentTextSearch,
 } from '../../global/selectors';
 import {
-  getChatTitle,
-  getUserFullName,
   isChatChannel,
 } from '../../global/helpers';
+import { disableDirectTextInput, enableDirectTextInput } from '../../util/directInputManager';
+import { renderMessageSummary } from '../common/helpers/renderMessageText';
 import useLang from '../../hooks/useLang';
 import useKeyboardListNavigation from '../../hooks/useKeyboardListNavigation';
 import useHistoryBack from '../../hooks/useHistoryBack';
 import useInfiniteScroll from '../../hooks/useInfiniteScroll';
-import { renderMessageSummary } from '../common/helpers/renderMessageText';
-import renderText from '../common/helpers/renderText';
 
 import InfiniteScroll from '../ui/InfiniteScroll';
 import ListItem from '../ui/ListItem';
 import LastMessageMeta from '../common/LastMessageMeta';
 import Avatar from '../common/Avatar';
+import FullNameTitle from '../common/FullNameTitle';
 
 import './RightSearch.scss';
 
@@ -73,7 +74,21 @@ const RightSearch: FC<OwnProps & StateProps> = ({
     onBack: onClose,
   });
 
-  const [viewportIds, getMore] = useInfiniteScroll(searchTextMessagesLocal, foundIds);
+  useEffect(() => {
+    if (!isActive) {
+      return undefined;
+    }
+
+    disableDirectTextInput();
+
+    return enableDirectTextInput;
+  }, [isActive]);
+
+  const handleSearchTextMessagesLocal = useCallback(() => {
+    searchTextMessagesLocal();
+  }, [searchTextMessagesLocal]);
+
+  const [viewportIds, getMore] = useInfiniteScroll(handleSearchTextMessagesLocal, foundIds);
 
   const viewportResults = useMemo(() => {
     if (!query || !viewportIds?.length || !messagesById) {
@@ -122,7 +137,6 @@ const RightSearch: FC<OwnProps & StateProps> = ({
     senderChat?: ApiChat;
     onClick: NoneToVoidFunction;
   }) => {
-    const title = senderChat ? getChatTitle(lang, senderChat) : getUserFullName(senderUser);
     const text = renderMessageSummary(lang, message, undefined, query);
 
     return (
@@ -134,8 +148,8 @@ const RightSearch: FC<OwnProps & StateProps> = ({
       >
         <Avatar chat={senderChat} user={senderUser} animationLevel={animationLevel} withVideo />
         <div className="info">
-          <div className="title">
-            <h3 dir="auto">{title && renderText(title)}</h3>
+          <div className="search-result-message-top">
+            <FullNameTitle peer={(senderUser || senderChat)!} />
             <LastMessageMeta message={message} />
           </div>
           <div className="subtitle" dir="auto">

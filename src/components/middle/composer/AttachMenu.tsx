@@ -10,6 +10,7 @@ import type { ISettings } from '../../../types';
 import { CONTENT_TYPES_WITH_PREVIEW } from '../../../config';
 import { IS_TOUCH_ENV } from '../../../util/environment';
 import { openSystemFilesDialog } from '../../../util/systemFilesDialog';
+import { validateFiles } from '../../../util/files';
 
 import useMouseInside from '../../../hooks/useMouseInside';
 import useLang from '../../../hooks/useLang';
@@ -18,29 +19,31 @@ import useFlag from '../../../hooks/useFlag';
 import ResponsiveHoverButton from '../../ui/ResponsiveHoverButton';
 import Menu from '../../ui/Menu';
 import MenuItem from '../../ui/MenuItem';
-import AttachmentMenuBotItem from './AttachmentMenuBotItem';
+import AttachBotItem from './AttachBotItem';
 
 import './AttachMenu.scss';
 
 export type OwnProps = {
   chatId: string;
+  threadId?: number;
   isButtonVisible: boolean;
   canAttachMedia: boolean;
   canAttachPolls: boolean;
   isScheduled?: boolean;
-  attachMenuBots: GlobalState['attachMenu']['bots'];
+  attachBots: GlobalState['attachMenu']['bots'];
   peerType?: ApiAttachMenuPeerType;
-  onFileSelect: (files: File[], isQuick: boolean) => void;
+  onFileSelect: (files: File[], shouldSuggestCompression?: boolean) => void;
   onPollCreate: () => void;
   theme: ISettings['theme'];
 };
 
 const AttachMenu: FC<OwnProps> = ({
   chatId,
+  threadId,
   isButtonVisible,
   canAttachMedia,
   canAttachPolls,
-  attachMenuBots,
+  attachBots,
   peerType,
   isScheduled,
   onFileSelect,
@@ -65,11 +68,12 @@ const AttachMenu: FC<OwnProps> = ({
     }
   }, [isAttachMenuOpen, openAttachMenu, closeAttachMenu]);
 
-  const handleFileSelect = useCallback((e: Event, isQuick: boolean) => {
+  const handleFileSelect = useCallback((e: Event, shouldSuggestCompression?: boolean) => {
     const { files } = e.target as HTMLInputElement;
+    const validatedFiles = validateFiles(files);
 
-    if (files && files.length > 0) {
-      onFileSelect(Array.from(files), isQuick);
+    if (validatedFiles?.length) {
+      onFileSelect(validatedFiles, shouldSuggestCompression);
     }
   }, [onFileSelect]);
 
@@ -85,14 +89,14 @@ const AttachMenu: FC<OwnProps> = ({
   }, [handleFileSelect]);
 
   const bots = useMemo(() => {
-    return Object.values(attachMenuBots).filter((bot) => {
+    return Object.values(attachBots).filter((bot) => {
       if (!peerType) return false;
-      if (peerType === 'bot' && bot.id === chatId && bot.peerTypes.includes('self')) {
+      if (peerType === 'bots' && bot.id === chatId && bot.peerTypes.includes('self')) {
         return true;
       }
       return bot.peerTypes.includes(peerType);
     });
-  }, [attachMenuBots, chatId, peerType]);
+  }, [attachBots, chatId, peerType]);
 
   const lang = useLang();
 
@@ -146,9 +150,10 @@ const AttachMenu: FC<OwnProps> = ({
         )}
 
         {canAttachMedia && !isScheduled && bots.map((bot) => (
-          <AttachmentMenuBotItem
+          <AttachBotItem
             bot={bot}
             chatId={chatId}
+            threadId={threadId}
             theme={theme}
             onMenuOpened={markAttachmentBotMenuOpen}
             onMenuClosed={unmarkAttachmentBotMenuOpen}

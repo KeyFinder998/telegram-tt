@@ -22,12 +22,13 @@ const {
 } = require('./auth');
 const { downloadFile } = require('./downloadFile');
 const { uploadFile } = require('./uploadFile');
-const { updateTwoFaSettings } = require('./2fa');
+const {
+    updateTwoFaSettings,
+    getTmpPassword,
+} = require('./2fa');
 
 const DEFAULT_DC_ID = 2;
 const WEBDOCUMENT_DC_ID = 4;
-const DEFAULT_IPV4_IP = 'zws2.web.telegram.org';
-const DEFAULT_IPV6_IP = '[2001:67c:4e8:f002::a]';
 const EXPORTED_SENDER_RECONNECT_TIMEOUT = 1000; // 1 sec
 const EXPORTED_SENDER_RELEASE_TIMEOUT = 30000; // 30 sec
 const WEBDOCUMENT_REQUEST_PART_SIZE = 131072; // 128kb
@@ -70,6 +71,7 @@ class TelegramClient {
         useWSS: false,
         additionalDcsDisabled: false,
         testServers: false,
+        dcId: DEFAULT_DC_ID,
     };
 
     /**
@@ -86,6 +88,7 @@ class TelegramClient {
         const args = { ...TelegramClient.DEFAULT_OPTIONS, ...opts };
         this.apiId = apiId;
         this.apiHash = apiHash;
+        this.defaultDcId = args.dcId || DEFAULT_DC_ID;
         this._useIPV6 = args.useIPV6;
         // this._entityCache = new Set()
         if (typeof args.baseLogger === 'string') {
@@ -221,8 +224,9 @@ class TelegramClient {
         await this.session.load();
 
         if (!this.session.serverAddress || (this.session.serverAddress.includes(':') !== this._useIPV6)) {
-            this.session.setDC(DEFAULT_DC_ID, this._useIPV6
-                ? DEFAULT_IPV6_IP : DEFAULT_IPV4_IP, this._args.useWSS ? 443 : 80);
+            const DC = utils.getDC(this.defaultDcId);
+            // TODO Fill IP addresses for when `this._useIPV6` is used
+            this.session.setDC(this.defaultDcId, DC.ipAddress, this._args.useWSS ? 443 : 80);
         }
     }
 
@@ -369,6 +373,24 @@ class TelegramClient {
         const sender = await this._exportedSenderPromises[dcId][index];
         delete this._exportedSenderPromises[dcId][index];
         await sender.disconnect();
+    }
+
+    async _cleanupExportedSenders(dcId) {
+        const promises = Object.values(this._exportedSenderPromises[dcId]);
+        if (!promises.length) {
+            return;
+        }
+
+        if (this.session.dcId !== dcId) {
+            this.session.setAuthKey(undefined, dcId);
+        }
+
+        this._exportedSenderPromises[dcId] = {};
+
+        await Promise.all(promises.map(async (promise) => {
+            const sender = await promise;
+            await sender.disconnect();
+        }));
     }
 
     async _connectSender(sender, dcId, isPremium = false) {
@@ -528,9 +550,12 @@ class TelegramClient {
         let media;
         if (messageOrMedia instanceof constructors.Message) {
             media = messageOrMedia.media;
+        } else if (messageOrMedia instanceof constructors.MessageService) {
+            media = messageOrMedia.action.photo;
         } else {
             media = messageOrMedia;
         }
+
         if (typeof media === 'string') {
             throw new Error('not implemented');
         }
@@ -598,21 +623,40 @@ class TelegramClient {
     }
 
     downloadStickerSetThumb(stickerSet) {
-        if (!stickerSet.thumbs || !stickerSet.thumbs.length) {
+        if (!stickerSet.thumbs?.length && !stickerSet.thumbDocumentId) {
             return undefined;
         }
 
         const { thumbVersion } = stickerSet;
-        return this.downloadFile(
-            new constructors.InputStickerSetThumb({
-                stickerset: new constructors.InputStickerSetID({
-                    id: stickerSet.id,
-                    accessHash: stickerSet.accessHash,
+
+        if (!stickerSet.thumbDocumentId) {
+            return this.downloadFile(
+                new constructors.InputStickerSetThumb({
+                    stickerset: new constructors.InputStickerSetID({
+                        id: stickerSet.id,
+                        accessHash: stickerSet.accessHash,
+                    }),
+                    thumbVersion,
                 }),
-                thumbVersion,
+                { dcId: stickerSet.thumbDcId },
+            );
+        }
+
+        return this.invoke(new constructors.messages.GetCustomEmojiDocuments({
+            documentId: [stickerSet.thumbDocumentId],
+        })).then((docs) => {
+            const doc = docs[0];
+            return this.downloadFile(new constructors.InputDocumentFileLocation({
+                id: doc.id,
+                accessHash: doc.accessHash,
+                fileReference: doc.fileReference,
+                thumbSize: '',
             }),
-            { dcId: stickerSet.thumbDcId },
-        );
+            {
+                fileSize: doc.size.toJSNumber(),
+                dcId: doc.dcId,
+            });
+        });
     }
 
     _pickFileSize(sizes, sizeType) {
@@ -906,6 +950,10 @@ class TelegramClient {
 
     updateTwoFaSettings(params) {
         return updateTwoFaSettings(this, params);
+    }
+
+    getTmpPassword(currentPassword, ttl) {
+        return getTmpPassword(this, currentPassword, ttl);
     }
 
     // event region

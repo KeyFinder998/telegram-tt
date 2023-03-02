@@ -6,15 +6,17 @@ import { getActions, getGlobal, withGlobal } from '../../../global';
 
 import type { MessageListType } from '../../../global/types';
 import type {
-  ApiAvailableReaction, ApiStickerSetInfo, ApiMessage, ApiStickerSet,
+  ApiAvailableReaction, ApiStickerSetInfo, ApiMessage, ApiStickerSet, ApiChatReactions, ApiReaction,
 } from '../../../api/types';
 import type { IAlbum, IAnchorPosition } from '../../../types';
 
 import {
   selectActiveDownloadIds,
   selectAllowedMessageActions,
+  selectCanScheduleUntilOnline,
   selectChat,
-  selectCurrentMessageList, selectIsCurrentUserPremium,
+  selectCurrentMessageList,
+  selectIsCurrentUserPremium,
   selectIsMessageProtected,
   selectIsPremiumPurchaseBlocked,
   selectMessageCustomEmojiSets,
@@ -22,26 +24,22 @@ import {
 } from '../../../global/selectors';
 import {
   isActionMessage, isChatChannel,
-  isChatGroup, isOwnMessage, areReactionsEmpty, isUserId, isMessageLocal, getMessageVideo,
+  isChatGroup, isOwnMessage, areReactionsEmpty, isUserId, isMessageLocal, getMessageVideo, getChatMessageLink,
 } from '../../../global/helpers';
-import { SERVICE_NOTIFICATIONS_USER_ID, TME_LINK_PREFIX } from '../../../config';
-import { getDayStartAt } from '../../../util/dateFormat';
+import { SERVICE_NOTIFICATIONS_USER_ID } from '../../../config';
 import buildClassName from '../../../util/buildClassName';
-import { REM } from '../../common/helpers/mediaDimensions';
 import { copyTextToClipboard } from '../../../util/clipboard';
 
 import useShowTransition from '../../../hooks/useShowTransition';
 import useFlag from '../../../hooks/useFlag';
 import useLang from '../../../hooks/useLang';
+import useSchedule from '../../../hooks/useSchedule';
 
 import DeleteMessageModal from '../../common/DeleteMessageModal';
 import ReportModal from '../../common/ReportModal';
 import PinMessageModal from '../../common/PinMessageModal';
 import MessageContextMenu from './MessageContextMenu';
-import CalendarModal from '../../common/CalendarModal';
 import ConfirmDialog from '../../ui/ConfirmDialog';
-
-const START_SIZE = 2 * REM;
 
 export type OwnProps = {
   isOpen: boolean;
@@ -66,7 +64,6 @@ type StateProps = {
   canShowReactionsCount?: boolean;
   canBuyPremium?: boolean;
   canShowReactionList?: boolean;
-  canRemoveReaction?: boolean;
   canUnpin?: boolean;
   canDelete?: boolean;
   canReport?: boolean;
@@ -86,7 +83,10 @@ type StateProps = {
   canClosePoll?: boolean;
   activeDownloads: number[];
   canShowSeenBy?: boolean;
-  enabledReactions?: string[];
+  enabledReactions?: ApiChatReactions;
+  canScheduleUntilOnline?: boolean;
+  maxUniqueReactions?: number;
+  threadId?: number;
 };
 
 const ContextMenuContainer: FC<OwnProps & StateProps> = ({
@@ -112,9 +112,9 @@ const ContextMenuContainer: FC<OwnProps & StateProps> = ({
   canReport,
   canShowReactionsCount,
   canShowReactionList,
-  canRemoveReaction,
   canEdit,
   enabledReactions,
+  maxUniqueReactions,
   isPrivate,
   isCurrentUserPremium,
   canForward,
@@ -130,6 +130,8 @@ const ContextMenuContainer: FC<OwnProps & StateProps> = ({
   canClosePoll,
   activeDownloads,
   canShowSeenBy,
+  canScheduleUntilOnline,
+  threadId,
 }) => {
   const {
     setReplyingToId,
@@ -145,7 +147,6 @@ const ContextMenuContainer: FC<OwnProps & StateProps> = ({
     cancelMessageMediaDownload,
     loadSeenBy,
     openSeenByModal,
-    sendReaction,
     openReactorListModal,
     loadFullChat,
     loadReactors,
@@ -154,6 +155,7 @@ const ContextMenuContainer: FC<OwnProps & StateProps> = ({
     loadStickers,
     cancelPollVote,
     closePoll,
+    toggleReaction,
   } = getActions();
 
   const lang = useLang();
@@ -162,8 +164,9 @@ const ContextMenuContainer: FC<OwnProps & StateProps> = ({
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
-  const [isCalendarOpen, openCalendar, closeCalendar] = useFlag();
   const [isClosePollDialogOpen, openClosePollDialog, closeClosePollDialog] = useFlag();
+
+  const [requestCalendar, calendar] = useSchedule(canScheduleUntilOnline, onClose, message.date);
 
   // `undefined` indicates that emoji are present and loading
   const hasCustomEmoji = customEmojiSetsInfo === undefined || Boolean(customEmojiSetsInfo.length);
@@ -199,7 +202,9 @@ const ContextMenuContainer: FC<OwnProps & StateProps> = ({
       // No need for expensive global updates on users, so we avoid them
       const usersById = getGlobal().users.byId;
 
-      return message.reactions?.recentReactions?.slice(0, 3).map(({ userId }) => usersById[userId]).filter(Boolean);
+      const uniqueReactors = new Set(message.reactions?.recentReactions?.map(({ userId }) => usersById[userId]));
+
+      return Array.from(uniqueReactors).filter(Boolean).slice(0, 3);
     }
 
     if (!message.seenByUserIds) {
@@ -244,11 +249,6 @@ const ContextMenuContainer: FC<OwnProps & StateProps> = ({
     onClose();
   }, [onClose]);
 
-  const handleCloseCalendar = useCallback(() => {
-    closeCalendar();
-    onClose();
-  }, [closeCalendar, onClose]);
-
   const handleReply = useCallback(() => {
     setReplyingToId({ messageId: message.id });
     closeMenu();
@@ -281,12 +281,12 @@ const ContextMenuContainer: FC<OwnProps & StateProps> = ({
 
   const handleFaveSticker = useCallback(() => {
     closeMenu();
-    faveSticker({ sticker: message.content.sticker });
+    faveSticker({ sticker: message.content.sticker! });
   }, [closeMenu, message.content.sticker, faveSticker]);
 
   const handleUnfaveSticker = useCallback(() => {
     closeMenu();
-    unfaveSticker({ sticker: message.content.sticker });
+    unfaveSticker({ sticker: message.content.sticker! });
   }, [closeMenu, message.content.sticker, unfaveSticker]);
 
   const handleCancelVote = useCallback(() => {
@@ -317,10 +317,19 @@ const ContextMenuContainer: FC<OwnProps & StateProps> = ({
     closeMenu();
   }, [closeMenu, message.chatId, message.id, sendScheduledMessages]);
 
+  const handleRescheduleMessage = useCallback((scheduledAt: number) => {
+    rescheduleMessage({
+      chatId: message.chatId,
+      messageId: message.id,
+      scheduledAt,
+    });
+    onClose();
+  }, [message.chatId, message.id, onClose, rescheduleMessage]);
+
   const handleOpenCalendar = useCallback(() => {
     setIsMenuOpen(false);
-    openCalendar();
-  }, [openCalendar]);
+    requestCalendar(handleRescheduleMessage);
+  }, [handleRescheduleMessage, requestCalendar]);
 
   const handleOpenSeenByModal = useCallback(() => {
     closeMenu();
@@ -332,23 +341,15 @@ const ContextMenuContainer: FC<OwnProps & StateProps> = ({
     openReactorListModal({ chatId: message.chatId, messageId: message.id });
   }, [closeMenu, openReactorListModal, message.chatId, message.id]);
 
-  const handleRescheduleMessage = useCallback((date: Date) => {
-    rescheduleMessage({
-      chatId: message.chatId,
-      messageId: message.id,
-      scheduledAt: Math.round(date.getTime() / 1000),
-    });
-  }, [message.chatId, message.id, rescheduleMessage]);
-
   const handleCopyMessages = useCallback((messageIds: number[]) => {
     copyMessagesByIds({ messageIds });
     closeMenu();
   }, [closeMenu, copyMessagesByIds]);
 
   const handleCopyLink = useCallback(() => {
-    copyTextToClipboard(`${TME_LINK_PREFIX}${chatUsername || `c/${message.chatId.replace('-', '')}`}/${message.id}`);
+    copyTextToClipboard(getChatMessageLink(message.chatId, chatUsername, threadId, message.id));
     closeMenu();
-  }, [chatUsername, closeMenu, message]);
+  }, [chatUsername, closeMenu, message, threadId]);
 
   const handleCopyNumber = useCallback(() => {
     copyTextToClipboard(message.content.contact!.phoneNumber);
@@ -368,16 +369,16 @@ const ContextMenuContainer: FC<OwnProps & StateProps> = ({
 
   const handleSaveGif = useCallback(() => {
     const video = getMessageVideo(message);
-    saveGif({ gif: video });
+    saveGif({ gif: video! });
     closeMenu();
   }, [closeMenu, message, saveGif]);
 
-  const handleSendReaction = useCallback((reaction: string | undefined, x: number, y: number) => {
-    sendReaction({
-      chatId: message.chatId, messageId: message.id, reaction, x, y, startSize: START_SIZE,
+  const handleToggleReaction = useCallback((reaction: ApiReaction) => {
+    toggleReaction({
+      chatId: message.chatId, messageId: message.id, reaction,
     });
     closeMenu();
-  }, [closeMenu, message.chatId, message.id, sendReaction]);
+  }, [closeMenu, message, toggleReaction]);
 
   const reportMessageIds = useMemo(() => (album ? album.messages : [message]).map(({ id }) => id), [album, message]);
 
@@ -400,10 +401,10 @@ const ContextMenuContainer: FC<OwnProps & StateProps> = ({
         canBuyPremium={canBuyPremium}
         isOpen={isMenuOpen}
         enabledReactions={enabledReactions}
+        maxUniqueReactions={maxUniqueReactions}
         anchor={anchor}
         canShowReactionsCount={canShowReactionsCount}
         canShowReactionList={canShowReactionList}
-        canRemoveReaction={canRemoveReaction}
         canSendNow={canSendNow}
         canReschedule={canReschedule}
         canReply={canReply}
@@ -448,7 +449,7 @@ const ContextMenuContainer: FC<OwnProps & StateProps> = ({
         onCancelVote={handleCancelVote}
         onClosePoll={openClosePollDialog}
         onShowSeenBy={handleOpenSeenByModal}
-        onSendReaction={handleSendReaction}
+        onToggleReaction={handleToggleReaction}
         onShowReactors={handleOpenReactorListModal}
       />
       <DeleteMessageModal
@@ -476,17 +477,7 @@ const ContextMenuContainer: FC<OwnProps & StateProps> = ({
         confirmLabel={lang('lng_polls_stop_sure')}
         confirmHandler={handlePollClose}
       />
-      {canReschedule && (
-        <CalendarModal
-          isOpen={isCalendarOpen}
-          withTimePicker
-          selectedAt={message.date * 1000}
-          maxAt={getDayStartAt(scheduledMaxDate)}
-          isFutureMode
-          onClose={handleCloseCalendar}
-          onSubmit={handleRescheduleMessage}
-        />
-      )}
+      {canReschedule && calendar}
     </div>
   );
 };
@@ -496,7 +487,7 @@ export default memo(withGlobal<OwnProps>(
     const { threadId } = selectCurrentMessageList(global) || {};
     const activeDownloads = selectActiveDownloadIds(global, message.chatId);
     const chat = selectChat(global, message.chatId);
-    const { seenByExpiresAt, seenByMaxChatMembers } = global.appConfig || {};
+    const { seenByExpiresAt, seenByMaxChatMembers, maxUniqueReactions } = global.appConfig || {};
     const {
       noOptions,
       canReply,
@@ -516,6 +507,7 @@ export default memo(withGlobal<OwnProps>(
       canRevote,
       canClosePoll,
     } = (threadId && selectAllowedMessageActions(global, message, threadId)) || {};
+
     const isPinned = messageListType === 'pinned';
     const isScheduled = messageListType === 'scheduled';
     const isChannel = chat && isChatChannel(chat);
@@ -533,7 +525,6 @@ export default memo(withGlobal<OwnProps>(
     const isAction = isActionMessage(message);
     const canShowReactionsCount = !isLocal && !isChannel && !isScheduled && !isAction && !isPrivate && message.reactions
       && !areReactionsEmpty(message.reactions) && message.reactions.canSeeList;
-    const canRemoveReaction = isPrivate && message.reactions?.results?.some((l) => l.isChosen);
     const isProtected = selectIsMessageProtected(global, message);
     const canCopyNumber = Boolean(message.content.contact);
     const isCurrentUserPremium = selectIsCurrentUserPremium(global);
@@ -554,11 +545,11 @@ export default memo(withGlobal<OwnProps>(
       canDelete,
       canReport,
       canEdit: !isPinned && canEdit,
-      canForward: !isProtected && !isScheduled && canForward,
+      canForward: !isScheduled && canForward,
       canFaveSticker: !isScheduled && canFaveSticker,
       canUnfaveSticker: !isScheduled && canUnfaveSticker,
       canCopy: canCopyNumber || (!isProtected && canCopy),
-      canCopyLink: !isProtected && !isScheduled && canCopyLink,
+      canCopyLink: !isScheduled && canCopyLink,
       canSelect,
       canDownload: !isProtected && canDownload,
       canSaveGif: !isProtected && canSaveGif,
@@ -567,15 +558,17 @@ export default memo(withGlobal<OwnProps>(
       activeDownloads,
       canShowSeenBy,
       enabledReactions: chat?.isForbidden ? undefined : chat?.fullInfo?.enabledReactions,
+      maxUniqueReactions,
       isPrivate,
       isCurrentUserPremium,
       hasFullInfo: Boolean(chat?.fullInfo),
       canShowReactionsCount,
       canShowReactionList: !isLocal && !isAction && !isScheduled && chat?.id !== SERVICE_NOTIFICATIONS_USER_ID,
-      canRemoveReaction,
       canBuyPremium: !isCurrentUserPremium && !selectIsPremiumPurchaseBlocked(global),
       customEmojiSetsInfo,
       customEmojiSets,
+      canScheduleUntilOnline: selectCanScheduleUntilOnline(global, message.chatId),
+      threadId,
     };
   },
 )(ContextMenuContainer));

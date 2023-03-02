@@ -1,5 +1,6 @@
 import type { ApiDocument, ApiPhoto } from './messages';
 import type { ApiBotInfo } from './bots';
+import type { API_CHAT_TYPES } from '../../config';
 
 export interface ApiUser {
   id: string;
@@ -12,7 +13,7 @@ export interface ApiUser {
   firstName?: string;
   lastName?: string;
   noStatus?: boolean;
-  username: string;
+  usernames?: ApiUsername[];
   phoneNumber: string;
   accessHash?: string;
   hasVideoAvatar?: boolean;
@@ -26,7 +27,8 @@ export interface ApiUser {
     isFullyLoaded: boolean;
   };
   fakeType?: ApiFakeType;
-  isAttachMenuBot?: boolean;
+  isAttachBot?: boolean;
+  emojiStatus?: ApiEmojiStatus;
 
   // Obtained from GetFullUser / UserFullInfo
   fullInfo?: ApiUserFullInfo;
@@ -39,6 +41,8 @@ export interface ApiUserFullInfo {
   pinnedMessageId?: number;
   botInfo?: ApiBotInfo;
   profilePhoto?: ApiPhoto;
+  fallbackPhoto?: ApiPhoto;
+  personalPhoto?: ApiPhoto;
   noVoiceMessages?: boolean;
   premiumGifts?: ApiPremiumGiftOption[];
 }
@@ -56,17 +60,25 @@ export interface ApiUserStatus {
   expires?: number;
 }
 
-export type ApiAttachMenuPeerType = 'self' | 'bot' | 'private' | 'chat' | 'channel';
-
-export interface ApiAttachMenuBot {
-  id: string;
-  hasSettings?: boolean;
-  shortName: string;
-  peerTypes: ApiAttachMenuPeerType[];
-  icons: ApiAttachMenuBotIcon[];
+export interface ApiUsername {
+  username: string;
+  isActive?: boolean;
+  isEditable?: boolean;
 }
 
-export interface ApiAttachMenuBotIcon {
+export type ApiChatType = typeof API_CHAT_TYPES[number];
+export type ApiAttachMenuPeerType = 'self' | ApiChatType;
+
+export interface ApiAttachBot {
+  id: string;
+  hasSettings?: boolean;
+  shouldRequestWriteAccess?: boolean;
+  shortName: string;
+  peerTypes: ApiAttachMenuPeerType[];
+  icons: ApiAttachBotIcon[];
+}
+
+export interface ApiAttachBotIcon {
   name: string;
   document: ApiDocument;
 }
@@ -76,4 +88,9 @@ export interface ApiPremiumGiftOption {
   currency: string;
   amount: number;
   botUrl: string;
+}
+
+export interface ApiEmojiStatus {
+  documentId: string;
+  until?: number;
 }

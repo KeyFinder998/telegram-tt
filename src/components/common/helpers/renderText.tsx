@@ -1,8 +1,9 @@
 import React from '../../../lib/teact/teact';
-import EMOJI_REGEX from '../../../lib/twemojiRegex';
 
+import type { TeactNode } from '../../../lib/teact/teact';
 import type { TextPart } from '../../../types';
 
+import EMOJI_REGEX from '../../../lib/twemojiRegex';
 import { RE_LINK_TEMPLATE, RE_MENTION_TEMPLATE } from '../../../config';
 import { IS_EMOJI_SUPPORTED } from '../../../util/environment';
 import {
@@ -29,7 +30,7 @@ export default function renderText(
   part: TextPart,
   filters: Array<TextFilter> = ['emoji'],
   params?: { highlight: string | undefined },
-): TextPart[] {
+): TeactNode[] {
   if (typeof part !== 'string') {
     return [part];
   }
@@ -129,9 +130,12 @@ function replaceEmojis(textParts: TextPart[], size: 'big' | 'small', type: 'jsx'
       }
       if (type === 'html') {
         emojiResult.push(
-          // For preventing extra spaces in html
-          // eslint-disable-next-line max-len
-          `<img draggable="false" class="${className}" src="./img-apple-${size === 'big' ? '160' : '64'}/${code}.png" alt="${emoji}" />`,
+          `<img\
+            draggable="false"\
+            class="${className}"\
+            src="./img-apple-${size === 'big' ? '160' : '64'}/${code}.png"\
+            alt="${emoji}"\
+          />`,
         );
       }
 
@@ -255,7 +259,7 @@ function replaceSimpleMarkdown(textParts: TextPart[], type: 'jsx' | 'html'): Tex
     }
 
     const parts = part.split(SIMPLE_MARKDOWN_REGEX);
-    const entities = part.match(SIMPLE_MARKDOWN_REGEX) || [];
+    const entities: string[] = part.match(SIMPLE_MARKDOWN_REGEX) || [];
     result.push(parts[0]);
 
     return entities.reduce((entityResult: TextPart[], entity, i) => {

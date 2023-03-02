@@ -1,11 +1,11 @@
-import type { FC } from '../../../lib/teact/teact';
 import React, {
   memo, useCallback, useEffect, useRef,
 } from '../../../lib/teact/teact';
 import { getActions } from '../../../global';
 
+import type { FC } from '../../../lib/teact/teact';
 import type {
-  ApiAvailableReaction, ApiMessage, ApiSponsoredMessage, ApiStickerSet, ApiUser,
+  ApiAvailableReaction, ApiChatReactions, ApiMessage, ApiReaction, ApiSponsoredMessage, ApiStickerSet, ApiUser,
 } from '../../../api/types';
 import type { IAnchorPosition } from '../../../types';
 
@@ -13,12 +13,12 @@ import { getMessageCopyOptions } from './helpers/copyOptions';
 import { disableScrolling, enableScrolling } from '../../../util/scrollLock';
 import { getUserFullName } from '../../../global/helpers';
 import buildClassName from '../../../util/buildClassName';
-import { IS_SINGLE_COLUMN_LAYOUT } from '../../../util/environment';
 import renderText from '../../common/helpers/renderText';
 
 import useFlag from '../../../hooks/useFlag';
 import useContextMenuPosition from '../../../hooks/useContextMenuPosition';
 import useLang from '../../../hooks/useLang';
+import useAppLayout from '../../../hooks/useAppLayout';
 
 import Menu from '../../ui/Menu';
 import MenuItem from '../../ui/MenuItem';
@@ -35,7 +35,8 @@ type OwnProps = {
   anchor: IAnchorPosition;
   message: ApiMessage | ApiSponsoredMessage;
   canSendNow?: boolean;
-  enabledReactions?: string[];
+  enabledReactions?: ApiChatReactions;
+  maxUniqueReactions?: number;
   canReschedule?: boolean;
   canReply?: boolean;
   canPin?: boolean;
@@ -44,7 +45,6 @@ type OwnProps = {
   canReport?: boolean;
   canShowReactionsCount?: boolean;
   canShowReactionList?: boolean;
-  canRemoveReaction?: boolean;
   canBuyPremium?: boolean;
   canEdit?: boolean;
   canForward?: boolean;
@@ -89,7 +89,7 @@ type OwnProps = {
   onShowReactors?: () => void;
   onAboutAds?: () => void;
   onSponsoredHide?: () => void;
-  onSendReaction?: (reaction: string | undefined, x: number, y: number) => void;
+  onToggleReaction?: (reaction: ApiReaction) => void;
 };
 
 const SCROLLBAR_WIDTH = 10;
@@ -103,6 +103,7 @@ const MessageContextMenu: FC<OwnProps> = ({
   isPrivate,
   isCurrentUserPremium,
   enabledReactions,
+  maxUniqueReactions,
   anchor,
   canSendNow,
   canReschedule,
@@ -126,7 +127,6 @@ const MessageContextMenu: FC<OwnProps> = ({
   isDownloading,
   canShowSeenBy,
   canShowReactionsCount,
-  canRemoveReaction,
   canShowReactionList,
   seenByRecentUsers,
   hasCustomEmoji,
@@ -153,7 +153,7 @@ const MessageContextMenu: FC<OwnProps> = ({
   onClosePoll,
   onShowSeenBy,
   onShowReactors,
-  onSendReaction,
+  onToggleReaction,
   onCopyMessages,
   onAboutAds,
   onSponsoredHide,
@@ -164,12 +164,13 @@ const MessageContextMenu: FC<OwnProps> = ({
   // eslint-disable-next-line no-null/no-null
   const scrollableRef = useRef<HTMLDivElement>(null);
   const lang = useLang();
-  const noReactions = !isPrivate && !enabledReactions?.length;
+  const noReactions = !isPrivate && !enabledReactions;
   const withReactions = canShowReactionList && !noReactions;
   const isSponsoredMessage = !('id' in message);
   const messageId = !isSponsoredMessage ? message.id : '';
 
   const [isReady, markIsReady, unmarkIsReady] = useFlag();
+  const { isMobile } = useAppLayout();
 
   const handleAfterCopy = useCallback(() => {
     showNotification({
@@ -217,11 +218,11 @@ const MessageContextMenu: FC<OwnProps> = ({
   );
 
   const getLayout = useCallback(() => {
-    const extraHeightAudioPlayer = (IS_SINGLE_COLUMN_LAYOUT
+    const extraHeightAudioPlayer = (isMobile
       && (document.querySelector<HTMLElement>('.AudioPlayer-content'))?.offsetHeight) || 0;
     const pinnedElement = document.querySelector<HTMLElement>('.HeaderPinnedMessage-wrapper');
-    const extraHeightPinned = (((IS_SINGLE_COLUMN_LAYOUT && !extraHeightAudioPlayer)
-      || (!IS_SINGLE_COLUMN_LAYOUT && pinnedElement?.classList.contains('full-width')))
+    const extraHeightPinned = (((isMobile && !extraHeightAudioPlayer)
+      || (!isMobile && pinnedElement?.classList.contains('full-width')))
       && pinnedElement?.offsetHeight) || 0;
 
     return {
@@ -230,11 +231,7 @@ const MessageContextMenu: FC<OwnProps> = ({
       marginSides: withReactions ? REACTION_BUBBLE_EXTRA_WIDTH : undefined,
       extraMarginTop: extraHeightPinned + extraHeightAudioPlayer,
     };
-  }, [withReactions]);
-
-  const handleRemoveReaction = useCallback(() => {
-    onSendReaction!(undefined, 0, 0);
-  }, [onSendReaction]);
+  }, [isMobile, withReactions]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -273,10 +270,12 @@ const MessageContextMenu: FC<OwnProps> = ({
       onClose={onClose}
       onCloseAnimationEnd={onCloseAnimationEnd}
     >
-      {canShowReactionList && (
+      {withReactions && (
         <ReactionSelector
           enabledReactions={enabledReactions}
-          onSendReaction={onSendReaction!}
+          currentReactions={!isSponsoredMessage ? message.reactions?.results : undefined}
+          maxUniqueReactions={maxUniqueReactions}
+          onToggleReaction={onToggleReaction!}
           isPrivate={isPrivate}
           availableReactions={availableReactions}
           isReady={isReady}
@@ -290,7 +289,6 @@ const MessageContextMenu: FC<OwnProps> = ({
         style={menuStyle}
         ref={scrollableRef}
       >
-        {canRemoveReaction && <MenuItem icon="heart-outline" onClick={handleRemoveReaction}>Remove Reaction</MenuItem>}
         {canSendNow && <MenuItem icon="send-outline" onClick={onSend}>{lang('MessageScheduleSend')}</MenuItem>}
         {canReschedule && (
           <MenuItem icon="schedule" onClick={onReschedule}>{lang('MessageScheduleEditTime')}</MenuItem>
@@ -336,7 +334,7 @@ const MessageContextMenu: FC<OwnProps> = ({
                   : lang('Chat.ContextReactionCount', message.reactors.count, 'i')
               ) : (
                 message.seenByUserIds?.length === 1 && seenByRecentUsers
-                  ? getUserFullName(seenByRecentUsers[0])
+                  ? renderText(getUserFullName(seenByRecentUsers[0])!)
                   : (message.seenByUserIds?.length
                     ? lang('Conversation.ContextMenuSeen', message.seenByUserIds.length, 'i')
                     : lang('Conversation.ContextMenuNoViews')

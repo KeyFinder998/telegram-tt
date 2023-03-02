@@ -13,9 +13,18 @@ import type {
   ApiChatFolder,
 } from './chats';
 import type {
-  ApiFormattedText, ApiMessage, ApiPhoto, ApiPoll, ApiReactions, ApiStickerSet, ApiThreadInfo,
+  ApiFormattedText,
+  ApiMessage,
+  ApiMessageExtendedMediaPreview,
+  ApiPhoto,
+  ApiPoll,
+  ApiReactions,
+  ApiStickerSet,
+  ApiThreadInfo,
 } from './messages';
-import type { ApiUser, ApiUserFullInfo, ApiUserStatus } from './users';
+import type {
+  ApiEmojiStatus, ApiUser, ApiUserFullInfo, ApiUserStatus,
+} from './users';
 import type {
   ApiEmojiInteraction, ApiError, ApiInviteInfo, ApiNotifyException, ApiSessionData,
 } from './misc';
@@ -52,7 +61,12 @@ export type ApiUpdateAuthorizationState = {
   authorizationState: ApiUpdateAuthorizationStateType;
   isCodeViaApp?: boolean;
   hint?: string;
+  noReset?: boolean;
   qrCode?: { token: string; expires: number };
+};
+
+export type ApiUpdateWebAuthTokenFailed = {
+  '@type': 'updateWebAuthTokenFailed';
 };
 
 export type ApiUpdateSession = {
@@ -107,6 +121,7 @@ export type ApiUpdateChatInbox = {
 export type ApiUpdateChatTypingStatus = {
   '@type': 'updateChatTypingStatus';
   id: string;
+  threadId?: number;
   typingStatus: ApiTypingStatus | undefined;
 };
 
@@ -170,7 +185,7 @@ export type ApiUpdateNewScheduledMessage = {
   '@type': 'newScheduledMessage';
   chatId: string;
   id: number;
-  message: Partial<ApiMessage>;
+  message: ApiMessage;
 };
 
 export type ApiUpdateNewMessage = {
@@ -295,6 +310,7 @@ export type ApiUpdateResetMessages = {
 export type ApiUpdateDraftMessage = {
   '@type': 'draftMessage';
   chatId: string;
+  threadId?: number;
   formattedText?: ApiFormattedText;
   date?: number;
   replyingToId?: number;
@@ -305,6 +321,14 @@ export type ApiUpdateMessageReactions = {
   id: number;
   chatId: string;
   reactions: ApiReactions;
+};
+
+export type ApiUpdateMessageExtendedMedia = {
+  '@type': 'updateMessageExtendedMedia';
+  id: number;
+  chatId: string;
+  media?: ApiMessage['content'];
+  preview?: ApiMessageExtendedMediaPreview;
 };
 
 export type ApiDeleteContact = {
@@ -318,10 +342,25 @@ export type ApiUpdateUser = {
   user: Partial<ApiUser>;
 };
 
+export type ApiUpdateRequestUserUpdate = {
+  '@type': 'updateRequestUserUpdate';
+  id: string;
+};
+
 export type ApiUpdateUserStatus = {
   '@type': 'updateUserStatus';
   userId: string;
   status: ApiUserStatus;
+};
+
+export type ApiUpdateUserEmojiStatus = {
+  '@type': 'updateUserEmojiStatus';
+  userId: string;
+  emojiStatus?: ApiEmojiStatus;
+};
+
+export type ApiUpdateRecentEmojiStatuses = {
+  '@type': 'updateRecentEmojiStatuses';
 };
 
 export type ApiUpdateUserFullInfo = {
@@ -347,6 +386,10 @@ export type ApiUpdateError = {
   error: ApiError;
 };
 
+export type ApiUpdateConfig = {
+  '@type': 'updateConfig';
+};
+
 export type ApiUpdateResetContacts = {
   '@type': 'updateResetContactList';
 };
@@ -357,6 +400,12 @@ export type ApiUpdateFavoriteStickers = {
 
 export type ApiUpdateRecentStickers = {
   '@type': 'updateRecentStickers';
+};
+
+export type ApiUpdateMoveStickerSetToTop = {
+  '@type': 'updateMoveStickerSetToTop';
+  isCustomEmoji?: boolean;
+  id: string;
 };
 
 export type ApiUpdateStickerSets = {
@@ -393,6 +442,11 @@ export type ApiUpdateNotifySettings = {
 
 export type ApiUpdateNotifyExceptions = {
   '@type': 'updateNotifyExceptions';
+} & ApiNotifyException;
+
+export type ApiUpdateTopicNotifyExceptions = {
+  '@type': 'updateTopicNotifyExceptions';
+  topicId: number;
 } & ApiNotifyException;
 
 export type ApiUpdateTwoFaStateWaitCode = {
@@ -525,8 +579,32 @@ export type ApiUpdateTranscribedAudio = {
   isPending?: boolean;
 };
 
+export type ApiUpdatePinnedTopic = {
+  '@type': 'updatePinnedTopic';
+  topicId: number;
+  chatId: string;
+  isPinned: boolean;
+};
+
+export type ApiUpdatePinnedTopicsOrder = {
+  '@type': 'updatePinnedTopicsOrder';
+  chatId: string;
+  order: number[];
+};
+
+export type ApiUpdateTopic = {
+  '@type': 'updateTopic';
+  chatId: string;
+  topicId: number;
+};
+
+export type ApiUpdateTopics = {
+  '@type': 'updateTopics';
+  chatId: string;
+};
+
 export type ApiUpdate = (
-  ApiUpdateReady | ApiUpdateSession |
+  ApiUpdateReady | ApiUpdateSession | ApiUpdateWebAuthTokenFailed | ApiUpdateRequestUserUpdate |
   ApiUpdateAuthorizationState | ApiUpdateAuthorizationError | ApiUpdateConnectionState | ApiUpdateCurrentUser |
   ApiUpdateChat | ApiUpdateChatInbox | ApiUpdateChatTypingStatus | ApiUpdateChatFullInfo | ApiUpdatePinnedChatIds |
   ApiUpdateChatMembers | ApiUpdateChatJoin | ApiUpdateChatLeave | ApiUpdateChatPinned | ApiUpdatePinnedMessageIds |
@@ -538,7 +616,7 @@ export type ApiUpdate = (
   ApiUpdateAvatar | ApiUpdateMessageImage | ApiUpdateDraftMessage |
   ApiUpdateError | ApiUpdateResetContacts | ApiUpdateStartEmojiInteraction |
   ApiUpdateFavoriteStickers | ApiUpdateStickerSet | ApiUpdateStickerSets | ApiUpdateStickerSetsOrder |
-  ApiUpdateRecentStickers | ApiUpdateSavedGifs | ApiUpdateNewScheduledMessage |
+  ApiUpdateRecentStickers | ApiUpdateSavedGifs | ApiUpdateNewScheduledMessage | ApiUpdateMoveStickerSetToTop |
   ApiUpdateScheduledMessageSendSucceeded | ApiUpdateScheduledMessage |
   ApiUpdateDeleteScheduledMessages | ApiUpdateResetMessages |
   ApiUpdateTwoFaError | ApiUpdateTwoFaStateWaitCode | ApiUpdateWebViewResultSent |
@@ -548,7 +626,9 @@ export type ApiUpdate = (
   ApiUpdateGroupCallConnectionState | ApiUpdateGroupCallLeavePresentation | ApiUpdateGroupCallChatId |
   ApiUpdatePendingJoinRequests | ApiUpdatePaymentVerificationNeeded | ApiUpdatePaymentStateCompleted |
   ApiUpdatePhoneCall | ApiUpdatePhoneCallSignalingData | ApiUpdatePhoneCallMediaState |
-  ApiUpdatePhoneCallConnectionState | ApiUpdateBotMenuButton | ApiUpdateTranscribedAudio
+  ApiUpdatePhoneCallConnectionState | ApiUpdateBotMenuButton | ApiUpdateTranscribedAudio | ApiUpdateUserEmojiStatus |
+  ApiUpdateMessageExtendedMedia | ApiUpdateConfig | ApiUpdateTopicNotifyExceptions | ApiUpdatePinnedTopic |
+  ApiUpdatePinnedTopicsOrder | ApiUpdateTopic | ApiUpdateTopics | ApiUpdateRecentEmojiStatuses
 );
 
 export type OnApiUpdate = (update: ApiUpdate) => void;

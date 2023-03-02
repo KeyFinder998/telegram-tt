@@ -13,9 +13,11 @@ export default function createInterface(api: Record<string, Function>) {
 
     switch (data.type) {
       case 'callMethod': {
-        const { messageId, name, args } = data;
+        const {
+          messageId, name, args, withCallback,
+        } = data;
         try {
-          if (messageId) {
+          if (messageId && withCallback) {
             const callback = (...callbackArgs: any[]) => {
               const lastArg = callbackArgs[callbackArgs.length - 1];
 
@@ -23,7 +25,7 @@ export default function createInterface(api: Record<string, Function>) {
                 type: 'methodCallback',
                 messageId,
                 callbackArgs,
-              }, lastArg instanceof ArrayBuffer ? [lastArg] : undefined);
+              }, isTransferable(lastArg) ? [lastArg] : undefined);
             };
 
             callbackState.set(messageId, callback);
@@ -76,6 +78,10 @@ export default function createInterface(api: Record<string, Function>) {
   };
 }
 
+function isTransferable(obj: any) {
+  return obj instanceof ArrayBuffer || obj instanceof ImageBitmap;
+}
+
 function handleErrors() {
   self.onerror = (e) => {
     // eslint-disable-next-line no-console
@@ -90,9 +96,9 @@ function handleErrors() {
   });
 }
 
-function sendToOrigin(data: WorkerMessageData, arrayBuffers?: ArrayBuffer[]) {
-  if (arrayBuffers) {
-    postMessage(data, arrayBuffers);
+function sendToOrigin(data: WorkerMessageData, transferables?: Transferable[]) {
+  if (transferables) {
+    postMessage(data, transferables);
   } else {
     postMessage(data);
   }

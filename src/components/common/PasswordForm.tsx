@@ -5,10 +5,12 @@ import React, {
 } from '../../lib/teact/teact';
 
 import { MIN_PASSWORD_LENGTH } from '../../config';
-import { IS_TOUCH_ENV, IS_SINGLE_COLUMN_LAYOUT } from '../../util/environment';
+import { IS_TOUCH_ENV } from '../../util/environment';
 import buildClassName from '../../util/buildClassName';
+import stopEvent from '../../util/stopEvent';
 import useLang from '../../hooks/useLang';
 import useTimeout from '../../hooks/useTimeout';
+import useAppLayout from '../../hooks/useAppLayout';
 
 import Button from '../ui/Button';
 
@@ -17,6 +19,7 @@ type OwnProps = {
   error?: string;
   hint?: string;
   placeholder?: string;
+  description?: string;
   isLoading?: boolean;
   shouldDisablePasswordManager?: boolean;
   shouldShowSubmit?: boolean;
@@ -26,10 +29,8 @@ type OwnProps = {
   noRipple?: boolean;
   onChangePasswordVisibility: (state: boolean) => void;
   onInputChange?: (password: string) => void;
-  onSubmit: (password: string) => void;
+  onSubmit?: (password: string) => void;
 };
-
-const FOCUS_DELAY_TIMEOUT_MS = IS_SINGLE_COLUMN_LAYOUT ? 550 : 400;
 
 const PasswordForm: FC<OwnProps> = ({
   isLoading = false,
@@ -38,6 +39,7 @@ const PasswordForm: FC<OwnProps> = ({
   hint,
   placeholder = 'Password',
   submitLabel = 'Next',
+  description,
   shouldShowSubmit,
   shouldResetValue,
   shouldDisablePasswordManager = false,
@@ -51,8 +53,10 @@ const PasswordForm: FC<OwnProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const lang = useLang();
 
+  const { isMobile } = useAppLayout();
   const [password, setPassword] = useState('');
   const [canSubmit, setCanSubmit] = useState(false);
+  const focusDelayTimeoutMs = isMobile ? 550 : 400;
 
   useEffect(() => {
     if (shouldResetValue) {
@@ -64,7 +68,7 @@ const PasswordForm: FC<OwnProps> = ({
     if (!IS_TOUCH_ENV) {
       inputRef.current!.focus();
     }
-  }, FOCUS_DELAY_TIMEOUT_MS);
+  }, focusDelayTimeoutMs);
 
   useEffect(() => {
     if (error) {
@@ -100,7 +104,7 @@ const PasswordForm: FC<OwnProps> = ({
     }
 
     if (canSubmit) {
-      onSubmit(password);
+      onSubmit!(password);
     }
   }
 
@@ -117,7 +121,7 @@ const PasswordForm: FC<OwnProps> = ({
   }
 
   return (
-    <form action="" onSubmit={handleSubmit} autoComplete="off">
+    <form action="" onSubmit={onSubmit ? handleSubmit : stopEvent} autoComplete="off">
       <div
         className={buildClassName('input-group password-input', password && 'touched', error && 'error')}
         dir={lang.isRtl ? 'rtl' : undefined}
@@ -145,7 +149,8 @@ const PasswordForm: FC<OwnProps> = ({
           <i className={isPasswordVisible ? 'icon-eye' : 'icon-eye-closed'} />
         </div>
       </div>
-      {(canSubmit || shouldShowSubmit) && (
+      {description && <p className="description">{description}</p>}
+      {onSubmit && (canSubmit || shouldShowSubmit) && (
         <Button type="submit" ripple={!noRipple} isLoading={isLoading} disabled={!canSubmit}>
           {submitLabel}
         </Button>

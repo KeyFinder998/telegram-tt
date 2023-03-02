@@ -1,7 +1,4 @@
 import { Api as GramJs } from '../../../lib/gramjs';
-import {
-  ApiMessageEntityTypes,
-} from '../../types';
 import type {
   ApiMessage,
   ApiMessageForwardInfo,
@@ -36,10 +33,17 @@ import type {
   PhoneCallAction,
   ApiWebDocument,
   ApiMessageEntityDefault,
+  ApiMessageExtendedMediaPreview,
+  ApiReaction,
+  ApiReactionEmoji,
+} from '../../types';
+import {
+  ApiMessageEntityTypes,
 } from '../../types';
 
 import {
   DELETED_COMMENTS_CHANNEL_ID,
+  LOCAL_MESSAGE_MIN_ID,
   SERVICE_NOTIFICATIONS_USER_ID,
   SPONSORED_MESSAGE_CACHE_MS,
   SUPPORTED_AUDIO_CONTENT_TYPES,
@@ -56,12 +60,26 @@ import { buildPeer } from '../gramjsBuilders';
 import { addPhotoToLocalDb, resolveMessageApiChatId, serializeBytes } from '../helpers';
 import { buildApiPeerId, getApiChatIdFromMtpPeer, isPeerUser } from './peers';
 import { buildApiCallDiscardReason } from './calls';
+import { getEmojiOnlyCountForMessage } from '../../../global/helpers/getEmojiOnlyCountForMessage';
+import { getServerTimeOffset } from '../../../util/serverTime';
+
+const TIMESTAMP_BASE = 1676e9; // 2023-02-10
+const TIMESTAMP_PRECISION = 1e2; // 0.1s
+const LOCAL_MESSAGES_LIMIT = 1e6; // 1M
 
 const LOCAL_MEDIA_UPLOADING_TEMP_ID = 'temp';
 const INPUT_WAVEFORM_LENGTH = 63;
 
-let localMessageCounter = 0;
-const getNextLocalMessageId = () => parseFloat(`${Date.now()}.${localMessageCounter++}`);
+let localMessageCounter = LOCAL_MESSAGE_MIN_ID;
+
+// Local IDs need to be fractional to allow service notifications to be placed between real messages.
+// It also allows to avoid collisions when sending messages from multiple tabs due to timestamp-based whole part.
+// To support up to 1M local messages, the whole part must be below 8.5B (https://stackoverflow.com/a/57225494/903919).
+// The overflow will happen when `datePart` is >3.59B which will be in June 2034.
+function getNextLocalMessageId() {
+  const datePart = Math.round((Date.now() - TIMESTAMP_BASE) / TIMESTAMP_PRECISION);
+  return LOCAL_MESSAGE_MIN_ID + datePart + (++localMessageCounter / LOCAL_MESSAGES_LIMIT);
+}
 
 let currentUserId!: string;
 
@@ -144,11 +162,14 @@ type UniversalMessage = (
   & Pick<Partial<GramJs.Message & GramJs.MessageService>, (
     'out' | 'message' | 'entities' | 'fromId' | 'peerId' | 'fwdFrom' | 'replyTo' | 'replyMarkup' | 'post' |
     'media' | 'action' | 'views' | 'editDate' | 'editHide' | 'mediaUnread' | 'groupedId' | 'mentioned' | 'viaBotId' |
-    'replies' | 'fromScheduled' | 'postAuthor' | 'noforwards' | 'reactions' | 'forwards'
+    'replies' | 'fromScheduled' | 'postAuthor' | 'noforwards' | 'reactions' | 'forwards' | 'silent'
   )>
 );
 
-export function buildApiMessageWithChatId(chatId: string, mtpMessage: UniversalMessage): ApiMessage {
+export function buildApiMessageWithChatId(
+  chatId: string,
+  mtpMessage: UniversalMessage,
+): ApiMessage {
   const fromId = mtpMessage.fromId ? getApiChatIdFromMtpPeer(mtpMessage.fromId) : undefined;
   const peerId = mtpMessage.peerId ? getApiChatIdFromMtpPeer(mtpMessage.peerId) : undefined;
   const isChatWithSelf = !fromId && chatId === currentUserId;
@@ -160,16 +181,26 @@ export function buildApiMessageWithChatId(chatId: string, mtpMessage: UniversalM
     content.action = action;
   }
 
-  const { replyToMsgId, replyToTopId, replyToPeerId } = mtpMessage.replyTo || {};
+  const isInvoiceMedia = mtpMessage.media instanceof GramJs.MessageMediaInvoice
+    && Boolean(mtpMessage.media.extendedMedia);
+
+  const {
+    replyToMsgId, replyToTopId, forumTopic, replyToPeerId,
+  } = mtpMessage.replyTo || {};
   const isEdited = mtpMessage.editDate && !mtpMessage.editHide;
   const {
-    inlineButtons, keyboardButtons, keyboardPlaceholder, isKeyboardSingleUse,
-  } = buildReplyButtons(mtpMessage) || {};
+    inlineButtons, keyboardButtons, keyboardPlaceholder, isKeyboardSingleUse, isKeyboardSelective,
+  } = buildReplyButtons(mtpMessage, isInvoiceMedia) || {};
   const forwardInfo = mtpMessage.fwdFrom && buildApiMessageForwardInfo(mtpMessage.fwdFrom, isChatWithSelf);
   const { replies, mediaUnread: isMediaUnread, postAuthor } = mtpMessage;
   const groupedId = mtpMessage.groupedId && String(mtpMessage.groupedId);
   const isInAlbum = Boolean(groupedId) && !(content.document || content.audio || content.sticker);
   const shouldHideKeyboardButtons = mtpMessage.replyMarkup instanceof GramJs.ReplyKeyboardHide;
+  const isHideKeyboardSelective = mtpMessage.replyMarkup instanceof GramJs.ReplyKeyboardHide
+    && mtpMessage.replyMarkup.selective;
+  const isProtected = mtpMessage.noforwards || isInvoiceMedia;
+  const isForwardingAllowed = !mtpMessage.noforwards;
+  const emojiOnlyCount = getEmojiOnlyCountForMessage(content, groupedId);
 
   return {
     id: mtpMessage.id,
@@ -181,8 +212,11 @@ export function buildApiMessageWithChatId(chatId: string, mtpMessage: UniversalM
     views: mtpMessage.views,
     forwards: mtpMessage.forwards,
     isFromScheduled: mtpMessage.fromScheduled,
+    isSilent: mtpMessage.silent,
     reactions: mtpMessage.reactions && buildMessageReactions(mtpMessage.reactions),
+    ...(emojiOnlyCount && { emojiOnlyCount }),
     ...(replyToMsgId && { replyToMessageId: replyToMsgId }),
+    ...(forumTopic && { isTopicReply: true }),
     ...(replyToPeerId && { replyToChatId: getApiChatIdFromMtpPeer(replyToPeerId) }),
     ...(replyToTopId && { replyToTopMessageId: replyToTopId }),
     ...(forwardInfo && { forwardInfo }),
@@ -196,12 +230,15 @@ export function buildApiMessageWithChatId(chatId: string, mtpMessage: UniversalM
       isInAlbum,
     }),
     inlineButtons,
-    ...(keyboardButtons && { keyboardButtons, keyboardPlaceholder, isKeyboardSingleUse }),
-    ...(shouldHideKeyboardButtons && { shouldHideKeyboardButtons }),
+    ...(keyboardButtons && {
+      keyboardButtons, keyboardPlaceholder, isKeyboardSingleUse, isKeyboardSelective,
+    }),
+    ...(shouldHideKeyboardButtons && { shouldHideKeyboardButtons, isHideKeyboardSelective }),
     ...(mtpMessage.viaBotId && { viaBotId: buildApiPeerId(mtpMessage.viaBotId, 'user') }),
-    ...(replies?.comments && { threadInfo: buildThreadInfo(replies, mtpMessage.id, chatId) }),
-    ...(postAuthor && { adminTitle: postAuthor }),
-    ...(mtpMessage.noforwards && { isProtected: true }),
+    ...(replies?.comments && { repliesThreadInfo: buildThreadInfo(replies, mtpMessage.id, chatId) }),
+    ...(postAuthor && { postAuthorTitle: postAuthor }),
+    isProtected,
+    isForwardingAllowed,
   };
 }
 
@@ -212,32 +249,65 @@ export function buildMessageReactions(reactions: GramJs.MessageReactions): ApiRe
 
   return {
     canSeeList,
-    results: results.map(buildReactionCount),
-    recentReactions: recentReactions?.map(buildMessagePeerReaction),
+    results: results.map(buildReactionCount).filter(Boolean).sort(reactionCountComparator),
+    recentReactions: recentReactions?.map(buildMessagePeerReaction).filter(Boolean),
   };
 }
 
-function buildReactionCount(reactionCount: GramJs.ReactionCount): ApiReactionCount {
-  const { chosen, count, reaction } = reactionCount;
+function reactionCountComparator(a: ApiReactionCount, b: ApiReactionCount) {
+  const diff = b.count - a.count;
+  if (diff) return diff;
+  if (a.chosenOrder !== undefined && b.chosenOrder !== undefined) {
+    return a.chosenOrder - b.chosenOrder;
+  }
+  if (a.chosenOrder !== undefined) return 1;
+  if (b.chosenOrder !== undefined) return -1;
+  return 0;
+}
+
+function buildReactionCount(reactionCount: GramJs.ReactionCount): ApiReactionCount | undefined {
+  const { chosenOrder, count, reaction } = reactionCount;
+
+  const apiReaction = buildApiReaction(reaction);
+  if (!apiReaction) return undefined;
 
   return {
-    isChosen: chosen,
+    chosenOrder,
     count,
-    reaction,
+    reaction: apiReaction,
   };
 }
 
-export function buildMessagePeerReaction(userReaction: GramJs.MessagePeerReaction): ApiUserReaction {
+export function buildMessagePeerReaction(userReaction: GramJs.MessagePeerReaction): ApiUserReaction | undefined {
   const {
     peerId, reaction, big, unread,
   } = userReaction;
 
+  const apiReaction = buildApiReaction(reaction);
+  if (!apiReaction) return undefined;
+
   return {
     userId: getApiChatIdFromMtpPeer(peerId),
-    reaction,
+    reaction: apiReaction,
     isUnread: unread,
     isBig: big,
   };
+}
+
+export function buildApiReaction(reaction: GramJs.TypeReaction): ApiReaction | undefined {
+  if (reaction instanceof GramJs.ReactionEmoji) {
+    return {
+      emoticon: reaction.emoticon,
+    };
+  }
+
+  if (reaction instanceof GramJs.ReactionCustomEmoji) {
+    return {
+      documentId: reaction.documentId.toString(),
+    };
+  }
+
+  return undefined;
 }
 
 export function buildApiAvailableReaction(availableReaction: GramJs.AvailableReaction): ApiAvailableReaction {
@@ -254,7 +324,7 @@ export function buildApiAvailableReaction(availableReaction: GramJs.AvailableRea
     staticIcon: buildApiDocument(staticIcon),
     aroundAnimation: aroundAnimation ? buildApiDocument(aroundAnimation) : undefined,
     centerIcon: centerIcon ? buildApiDocument(centerIcon) : undefined,
-    reaction,
+    reaction: { emoticon: reaction } as ApiReactionEmoji,
     title,
     isInactive: inactive,
     isPremium: premium,
@@ -316,6 +386,10 @@ export function buildMessageMediaContent(media: GramJs.TypeMessageMedia): ApiMes
     return undefined;
   }
 
+  if ('extendedMedia' in media && media.extendedMedia instanceof GramJs.MessageExtendedMedia) {
+    return buildMessageMediaContent(media.extendedMedia.media);
+  }
+
   const sticker = buildSticker(media);
   if (sticker) return { sticker };
 
@@ -361,6 +435,7 @@ function buildApiMessageForwardInfo(fwdFrom: GramJs.MessageFwdHeader, isChatWith
 
   return {
     date: fwdFrom.date,
+    isImported: fwdFrom.imported,
     isChannelPost: Boolean(fwdFrom.channelPost),
     channelPostId: fwdFrom.channelPost,
     isLinkedChannelPost: Boolean(fwdFrom.channelPost && savedFromPeerId && !isChatWithSelf),
@@ -368,7 +443,7 @@ function buildApiMessageForwardInfo(fwdFrom: GramJs.MessageFwdHeader, isChatWith
     fromMessageId: fwdFrom.savedFromMsgId || fwdFrom.channelPost,
     senderUserId: fromId,
     hiddenUserName: fwdFrom.fromName,
-    adminTitle: fwdFrom.postAuthor,
+    postAuthorTitle: fwdFrom.postAuthor,
   };
 }
 
@@ -389,10 +464,10 @@ function buildPhoto(media: GramJs.TypeMessageMedia): ApiPhoto | undefined {
     return undefined;
   }
 
-  return buildApiPhoto(media.photo);
+  return buildApiPhoto(media.photo, media.spoiler);
 }
 
-export function buildVideoFromDocument(document: GramJs.Document): ApiVideo | undefined {
+export function buildVideoFromDocument(document: GramJs.Document, isSpoiler?: boolean): ApiVideo | undefined {
   if (document instanceof GramJs.DocumentEmpty) {
     return undefined;
   }
@@ -441,6 +516,7 @@ export function buildVideoFromDocument(document: GramJs.Document): ApiVideo | un
     isGif: Boolean(gifAttr),
     thumbnail: buildApiThumbnailFromStripped(thumbs),
     size: size.toJSNumber(),
+    isSpoiler,
   };
 }
 
@@ -453,7 +529,7 @@ function buildVideo(media: GramJs.TypeMessageMedia): ApiVideo | undefined {
     return undefined;
   }
 
-  return buildVideoFromDocument(media.document);
+  return buildVideoFromDocument(media.document, media.spoiler);
 }
 
 function buildAudio(media: GramJs.TypeMessageMedia): ApiAudio | undefined {
@@ -728,17 +804,21 @@ export function buildPoll(poll: GramJs.Poll, pollResults: GramJs.PollResults): A
 
 export function buildInvoice(media: GramJs.MessageMediaInvoice): ApiInvoice {
   const {
-    description: text, title, photo, test, totalAmount, currency, receiptMsgId,
+    description: text, title, photo, test, totalAmount, currency, receiptMsgId, extendedMedia,
   } = media;
 
+  const preview = extendedMedia instanceof GramJs.MessageExtendedMediaPreview
+    ? buildApiMessageExtendedMediaPreview(extendedMedia) : undefined;
+
   return {
-    text,
     title,
+    text,
     photo: buildApiWebDocument(photo),
     receiptMsgId,
     amount: Number(totalAmount),
     currency,
     isTest: test,
+    extendedMedia: preview,
   };
 }
 
@@ -818,6 +898,7 @@ function buildAction(
   let photo: ApiPhoto | undefined;
   let score: number | undefined;
   let months: number | undefined;
+  let topicEmojiIconId: string | undefined;
 
   const targetUserIds = 'users' in action
     ? action.users && action.users.map((id) => buildApiPeerId(id, 'user'))
@@ -962,6 +1043,37 @@ function buildAction(
     currency = action.currency;
     amount = action.amount.toJSNumber();
     months = action.months;
+  } else if (action instanceof GramJs.MessageActionTopicCreate) {
+    text = 'TopicWasCreatedAction';
+    type = 'topicCreate';
+    translationValues.push(action.title);
+  } else if (action instanceof GramJs.MessageActionTopicEdit) {
+    if (action.closed !== undefined) {
+      text = action.closed ? 'TopicWasClosedAction' : 'TopicWasReopenedAction';
+      translationValues.push('%action_origin%', '%action_topic%');
+    } else if (action.hidden !== undefined) {
+      text = action.hidden ? 'TopicHidden2' : 'TopicShown';
+    } else if (action.title) {
+      text = 'TopicRenamedTo';
+      translationValues.push('%action_origin%', action.title);
+    } else if (action.iconEmojiId) {
+      text = 'TopicWasIconChangedToAction';
+      translationValues.push('%action_origin%', '%action_topic_icon%');
+      topicEmojiIconId = action.iconEmojiId.toString();
+    } else {
+      text = 'ChatList.UnsupportedMessage';
+    }
+  } else if (action instanceof GramJs.MessageActionAttachMenuBotAllowed) {
+    text = 'ActionAttachMenuBotAllowed';
+  } else if (action instanceof GramJs.MessageActionSuggestProfilePhoto) {
+    const isVideo = action.photo instanceof GramJs.Photo && action.photo.videoSizes?.length;
+    text = senderId === currentUserId
+      ? (isVideo ? 'ActionSuggestVideoFromYouDescription' : 'ActionSuggestPhotoFromYouDescription')
+      : (isVideo ? 'ActionSuggestVideoToYouDescription' : 'ActionSuggestPhotoToYouDescription');
+    type = 'suggestProfilePhoto';
+    translationValues.push('%target_user%');
+
+    if (targetPeerId) targetUserIds.push(targetPeerId);
   } else {
     text = 'ChatList.UnsupportedMessage';
   }
@@ -984,10 +1096,11 @@ function buildAction(
     phoneCall,
     score,
     months,
+    topicEmojiIconId,
   };
 }
 
-function buildReplyButtons(message: UniversalMessage): ApiReplyKeyboard | undefined {
+function buildReplyButtons(message: UniversalMessage, shouldSkipBuyButton?: boolean): ApiReplyKeyboard | undefined {
   const { replyMarkup, media } = message;
 
   // TODO Move to the proper button inside preview
@@ -1013,7 +1126,7 @@ function buildReplyButtons(message: UniversalMessage): ApiReplyKeyboard | undefi
   }
 
   const markup = replyMarkup.rows.map(({ buttons }) => {
-    return buttons.map((button): ApiKeyboardButton => {
+    return buttons.map((button): ApiKeyboardButton | undefined => {
       const { text } = button;
 
       if (button instanceof GramJs.KeyboardButton) {
@@ -1076,6 +1189,7 @@ function buildReplyButtons(message: UniversalMessage): ApiReplyKeyboard | undefi
             receiptMessageId: media.receiptMsgId,
           };
         }
+        if (shouldSkipBuyButton) return undefined;
         return {
           type: 'buy',
           text,
@@ -1135,14 +1249,17 @@ function buildReplyButtons(message: UniversalMessage): ApiReplyKeyboard | undefi
         type: 'unsupported',
         text,
       };
-    });
+    }).filter(Boolean);
   });
+
+  if (markup.every((row) => !row.length)) return undefined;
 
   return {
     [replyMarkup instanceof GramJs.ReplyKeyboardMarkup ? 'keyboardButtons' : 'inlineButtons']: markup,
     ...(replyMarkup instanceof GramJs.ReplyKeyboardMarkup && {
       keyboardPlaceholder: replyMarkup.placeholder,
       isKeyboardSingleUse: replyMarkup.singleUse,
+      isKeyboardSelective: replyMarkup.selective,
     }),
   };
 }
@@ -1175,13 +1292,13 @@ export function buildLocalMessage(
   groupedId?: string,
   scheduledAt?: number,
   sendAs?: ApiChat | ApiUser,
-  serverTimeOffset = 0,
 ): ApiMessage {
   const localId = getNextLocalMessageId();
   const media = attachment && buildUploadingMedia(attachment);
   const isChannel = chat.type === 'chatTypeChannel';
+  const isForum = chat.isForum;
 
-  return {
+  const message = {
     id: localId,
     chatId: chat.id,
     content: {
@@ -1197,28 +1314,45 @@ export function buildLocalMessage(
       ...(poll && buildNewPoll(poll, localId)),
       ...(contact && { contact }),
     },
-    date: scheduledAt || Math.round(Date.now() / 1000) + serverTimeOffset,
+    date: scheduledAt || Math.round(Date.now() / 1000) + getServerTimeOffset(),
     isOutgoing: !isChannel,
     senderId: sendAs?.id || currentUserId,
     ...(replyingTo && { replyToMessageId: replyingTo }),
     ...(replyingToTopId && { replyToTopMessageId: replyingToTopId }),
+    ...((replyingTo || replyingToTopId) && isForum && { isTopicReply: true }),
     ...(groupedId && {
       groupedId,
       ...(media && (media.photo || media.video) && { isInAlbum: true }),
     }),
     ...(scheduledAt && { isScheduled: true }),
+    isForwardingAllowed: true,
+  } satisfies ApiMessage;
+
+  const emojiOnlyCount = getEmojiOnlyCountForMessage(message.content, message.groupedId);
+
+  return {
+    ...message,
+    ...(emojiOnlyCount && { emojiOnlyCount }),
   };
 }
 
-export function buildLocalForwardedMessage(
-  toChat: ApiChat,
-  message: ApiMessage,
-  serverTimeOffset: number,
-  scheduledAt?: number,
-  noAuthors?: boolean,
-  noCaptions?: boolean,
-  isCurrentUserPremium?: boolean,
-): ApiMessage {
+export function buildLocalForwardedMessage({
+  toChat,
+  toThreadId,
+  message,
+  scheduledAt,
+  noAuthors,
+  noCaptions,
+  isCurrentUserPremium,
+}: {
+  toChat: ApiChat;
+  toThreadId?: number;
+  message: ApiMessage;
+  scheduledAt?: number;
+  noAuthors?: boolean;
+  noCaptions?: boolean;
+  isCurrentUserPremium?: boolean;
+}): ApiMessage {
   const localId = getNextLocalMessageId();
   const {
     content,
@@ -1237,8 +1371,9 @@ export function buildLocalForwardedMessage(
   const shouldDropCustomEmoji = !isCurrentUserPremium;
   const strippedText = content.text?.entities && shouldDropCustomEmoji ? {
     text: content.text.text,
-    entities: content.text.entities?.filter((entity) => entity.type !== ApiMessageEntityTypes.CustomEmoji),
+    entities: content.text.entities.filter((entity) => entity.type !== ApiMessageEntityTypes.CustomEmoji),
   } : content.text;
+  const emojiOnlyCount = getEmojiOnlyCountForMessage(content, groupedId);
 
   const updatedContent = {
     ...content,
@@ -1249,14 +1384,19 @@ export function buildLocalForwardedMessage(
     id: localId,
     chatId: toChat.id,
     content: updatedContent,
-    date: scheduledAt || Math.round(Date.now() / 1000) + serverTimeOffset,
+    date: scheduledAt || Math.round(Date.now() / 1000) + getServerTimeOffset(),
     isOutgoing: !asIncomingInChatWithSelf && toChat.type !== 'chatTypeChannel',
     senderId: currentUserId,
     sendingState: 'messageSendingStatePending',
     groupedId,
     isInAlbum,
+    isForwardingAllowed: true,
+    replyToTopMessageId: toThreadId,
+    ...(toThreadId && toChat?.isForum && { isTopicReply: true }),
+
+    ...(emojiOnlyCount && { emojiOnlyCount }),
     // Forward info doesn't get added when users forwards his own messages, also when forwarding audio
-    ...(senderId !== currentUserId && !isAudio && !noAuthors && {
+    ...(message.chatId !== currentUserId && !isAudio && !noAuthors && {
       forwardInfo: {
         date: message.date,
         isChannelPost: false,
@@ -1265,6 +1405,7 @@ export function buildLocalForwardedMessage(
         senderUserId: senderId,
       },
     }),
+    ...(message.chatId === currentUserId && !noAuthors && { forwardInfo: message.forwardInfo }),
     ...(scheduledAt && { isScheduled: true }),
   };
 }
@@ -1278,61 +1419,69 @@ function buildUploadingMedia(
     previewBlobUrl,
     mimeType,
     size,
+    audio,
+    shouldSendAsFile,
+    shouldSendAsSpoiler,
   } = attachment;
 
-  if (attachment.quick) {
-    if (SUPPORTED_IMAGE_CONTENT_TYPES.has(mimeType)) {
-      const { width, height } = attachment.quick;
+  if (!shouldSendAsFile) {
+    if (attachment.quick) {
+      // TODO Handle GIF as video, but support playback in <video>
+      if (SUPPORTED_IMAGE_CONTENT_TYPES.has(mimeType)) {
+        const { width, height } = attachment.quick;
+        return {
+          photo: {
+            id: LOCAL_MEDIA_UPLOADING_TEMP_ID,
+            sizes: [],
+            thumbnail: { width, height, dataUri: blobUrl },
+            blobUrl,
+            isSpoiler: shouldSendAsSpoiler,
+          },
+        };
+      }
+      if (SUPPORTED_VIDEO_CONTENT_TYPES.has(mimeType)) {
+        const { width, height, duration } = attachment.quick;
+        return {
+          video: {
+            id: LOCAL_MEDIA_UPLOADING_TEMP_ID,
+            mimeType,
+            duration: duration || 0,
+            fileName,
+            width,
+            height,
+            blobUrl,
+            ...(previewBlobUrl && { thumbnail: { width, height, dataUri: previewBlobUrl } }),
+            size,
+            isSpoiler: shouldSendAsSpoiler,
+          },
+        };
+      }
+    }
+    if (attachment.voice) {
+      const { duration, waveform } = attachment.voice;
+      const { data: inputWaveform } = interpolateArray(waveform, INPUT_WAVEFORM_LENGTH);
       return {
-        photo: {
+        voice: {
           id: LOCAL_MEDIA_UPLOADING_TEMP_ID,
-          sizes: [],
-          thumbnail: { width, height, dataUri: '' }, // Used only for dimensions
-          blobUrl,
+          duration,
+          waveform: inputWaveform,
         },
       };
     }
-    if (SUPPORTED_VIDEO_CONTENT_TYPES.has(mimeType)) {
-      const { width, height, duration } = attachment.quick;
+    if (SUPPORTED_AUDIO_CONTENT_TYPES.has(mimeType)) {
+      const { duration, performer, title } = audio || {};
       return {
-        video: {
+        audio: {
           id: LOCAL_MEDIA_UPLOADING_TEMP_ID,
           mimeType,
-          duration: duration || 0,
           fileName,
-          width,
-          height,
-          blobUrl,
-          ...(previewBlobUrl && { thumbnail: { width, height, dataUri: previewBlobUrl } }),
           size,
+          duration: duration || 0,
+          title,
+          performer,
         },
       };
     }
-  }
-  if (attachment.voice) {
-    const { duration, waveform } = attachment.voice;
-    const { data: inputWaveform } = interpolateArray(waveform, INPUT_WAVEFORM_LENGTH);
-    return {
-      voice: {
-        id: LOCAL_MEDIA_UPLOADING_TEMP_ID,
-        duration,
-        waveform: inputWaveform,
-      },
-    };
-  }
-  if (SUPPORTED_AUDIO_CONTENT_TYPES.has(mimeType)) {
-    const { duration, performer, title } = attachment.audio || {};
-    return {
-      audio: {
-        id: LOCAL_MEDIA_UPLOADING_TEMP_ID,
-        mimeType,
-        fileName,
-        size,
-        duration: duration || 0,
-        title,
-        performer,
-      },
-    };
   }
   return {
     document: {
@@ -1341,6 +1490,21 @@ function buildUploadingMedia(
       size,
       ...(previewBlobUrl && { previewBlobUrl }),
     },
+  };
+}
+
+export function buildApiMessageExtendedMediaPreview(
+  preview: GramJs.MessageExtendedMediaPreview,
+): ApiMessageExtendedMediaPreview {
+  const {
+    w, h, thumb, videoDuration,
+  } = preview;
+
+  return {
+    width: w,
+    height: h,
+    duration: videoDuration,
+    thumbnail: thumb ? buildApiThumbnailFromStripped([thumb]) : undefined,
   };
 }
 

@@ -5,8 +5,10 @@ import type { GlobalState } from '../global/types';
 import type { NotifyException, NotifySettings } from '../types';
 import type { ApiChat, ApiChatFolder, ApiUser } from '../api/types';
 
-import { ALL_FOLDER_ID, ARCHIVED_FOLDER_ID, DEBUG } from '../config';
-import { selectNotifySettings, selectNotifyExceptions } from '../global/selectors';
+import {
+  ALL_FOLDER_ID, ARCHIVED_FOLDER_ID, DEBUG, SERVICE_NOTIFICATIONS_USER_ID,
+} from '../config';
+import { selectNotifySettings, selectNotifyExceptions, selectTabState } from '../global/selectors';
 import { selectIsChatMuted } from '../global/helpers';
 import { onIdle, throttle } from './schedulers';
 import { areSortedArraysEqual, unique } from './iteratees';
@@ -104,7 +106,11 @@ export function init() {
   addCallback(updateFolderManagerThrottled);
   addActionHandler('reset', reset);
 
-  updateFolderManager(getGlobal());
+  const global = getGlobal();
+  if (!selectTabState(global).isMasterTab) {
+    updateFolders(global, true, true, true);
+  }
+  updateFolderManager(global);
 }
 
 export function getOrderedIds(folderId: number) {
@@ -420,16 +426,28 @@ function buildChatSummary(
 ): ChatSummary {
   const {
     id, type, lastMessage, isRestricted, isNotJoined, migratedTo, folderId,
-    unreadCount, unreadMentionsCount, hasUnreadMark,
-    joinDate, draftDate,
+    unreadCount: chatUnreadCount, unreadMentionsCount: chatUnreadMentionsCount, hasUnreadMark,
+    joinDate, draftDate, isForum, topics,
   } = chat;
 
+  const { unreadCount, unreadMentionsCount } = isForum
+    ? Object.values(topics || {}).reduce((acc, topic) => {
+      acc.unreadCount += topic.unreadCount;
+      acc.unreadMentionsCount += topic.unreadMentionsCount;
+
+      return acc;
+    }, { unreadCount: 0, unreadMentionsCount: 0 })
+    : { unreadCount: chatUnreadCount, unreadMentionsCount: chatUnreadMentionsCount };
+
   const userInfo = type === 'chatTypePrivate' && user;
+  const shouldHideServiceChat = chat.id === SERVICE_NOTIFICATIONS_USER_ID && (
+    !chat.lastMessage || chat.lastMessage.content.action?.type === 'historyClear'
+  );
 
   return {
     id,
     type,
-    isListed: Boolean(!isRestricted && !isNotJoined && !migratedTo),
+    isListed: Boolean(!isRestricted && !isNotJoined && !migratedTo && !shouldHideServiceChat),
     isArchived: folderId === ARCHIVED_FOLDER_ID,
     isMuted: selectIsChatMuted(chat, notifySettings, notifyExceptions),
     isUnread: Boolean(unreadCount || unreadMentionsCount || hasUnreadMark),

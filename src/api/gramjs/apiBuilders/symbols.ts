@@ -35,6 +35,7 @@ export function buildStickerFromDocument(document: GramJs.TypeDocument, isNoPrem
   const isLottie = mimeType === LOTTIE_STICKER_MIME_TYPE;
   const isVideo = mimeType === VIDEO_STICKER_MIME_TYPE;
   const isCustomEmoji = Boolean(customEmojiAttribute);
+  const shouldUseTextColor = isCustomEmoji && customEmojiAttribute.textColor;
 
   const imageSizeAttribute = document.attributes
     .find((attr: any): attr is GramJs.DocumentAttributeImageSize => (
@@ -94,6 +95,7 @@ export function buildStickerFromDocument(document: GramJs.TypeDocument, isNoPrem
     thumbnail,
     hasEffect,
     isFree,
+    shouldUseTextColor,
   };
 }
 
@@ -110,10 +112,11 @@ export function buildStickerSet(set: GramJs.StickerSet): ApiStickerSet {
     count,
     shortName,
     emojis,
+    thumbDocumentId,
   } = set;
 
   return {
-    archived,
+    isArchived: archived,
     isLottie: animated,
     isVideos: videos,
     isEmoji: emojis,
@@ -121,7 +124,7 @@ export function buildStickerSet(set: GramJs.StickerSet): ApiStickerSet {
     id: String(id),
     accessHash: String(accessHash),
     title,
-    hasThumbnail: Boolean(thumbs?.length),
+    hasThumbnail: Boolean(thumbs?.length || thumbDocumentId),
     count,
     shortName,
   };
@@ -148,6 +151,10 @@ function buildApiStickerSetInfo(inputSet?: GramJs.TypeInputStickerSet): ApiStick
 export function buildStickerSetCovered(coveredStickerSet: GramJs.TypeStickerSetCovered): ApiStickerSet {
   const stickerSet = buildStickerSet(coveredStickerSet.set);
 
+  if (coveredStickerSet instanceof GramJs.StickerSetNoCovered) {
+    return stickerSet;
+  }
+
   const stickerSetCovers = (coveredStickerSet instanceof GramJs.StickerSetCovered) ? [coveredStickerSet.cover]
     : (coveredStickerSet instanceof GramJs.StickerSetMultiCovered) ? coveredStickerSet.covers
       : coveredStickerSet.documents;
@@ -170,7 +177,7 @@ export function buildStickerSetCovered(coveredStickerSet: GramJs.TypeStickerSetC
 
 export function buildApiEmojiInteraction(json: GramJsEmojiInteraction): ApiEmojiInteraction {
   return {
-    timestamps: json.a.map((l) => l.t),
+    timestamps: json.a.map(({ t }) => t),
   };
 }
 
@@ -178,7 +185,7 @@ export function processStickerPackResult(packs: GramJs.StickerPack[]) {
   return packs.reduce((acc, { emoticon, documents }) => {
     acc[emoticon] = documents.map((documentId) => buildStickerFromDocument(
       localDb.documents[String(documentId)],
-    )).filter<ApiSticker>(Boolean as any);
+    )).filter(Boolean);
     return acc;
   }, {} as Record<string, ApiSticker[]>);
 }

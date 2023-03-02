@@ -4,7 +4,9 @@ import { getActions } from '../../../../global';
 
 import type { IAlbum } from '../../../../types';
 import { MediaViewerOrigin } from '../../../../types';
-import type { ApiChat, ApiMessage, ApiUser } from '../../../../api/types';
+import type {
+  ApiChat, ApiTopic, ApiMessage, ApiUser,
+} from '../../../../api/types';
 import { MAIN_THREAD_ID } from '../../../../api/types';
 import type { LangFn } from '../../../../hooks/useLang';
 
@@ -22,6 +24,7 @@ export default function useInnerHandlers(
   avatarPeer?: ApiUser | ApiChat,
   senderPeer?: ApiUser | ApiChat,
   botSender?: ApiUser,
+  messageTopic?: ApiTopic,
 ) {
   const {
     openChat, showNotification, focusMessage, openMediaViewer, openAudioPlayer,
@@ -68,8 +71,9 @@ export default function useInnerHandlers(
     focusMessage({
       chatId: isChatWithRepliesBot && replyToChatId ? replyToChatId : chatId,
       threadId,
-      messageId: replyToMessageId,
+      messageId: replyToMessageId!,
       replyMessageId: isChatWithRepliesBot && replyToChatId ? undefined : messageId,
+      noForumTopicPanel: true,
     });
   }, [focusMessage, isChatWithRepliesBot, replyToChatId, chatId, threadId, replyToMessageId, messageId]);
 
@@ -129,7 +133,7 @@ export default function useInnerHandlers(
   const handleFocusForwarded = useCallback(() => {
     if (isInDocumentGroup) {
       focusMessage({
-        chatId: forwardInfo!.fromChatId, groupedId, groupedChatId: chatId,
+        chatId: forwardInfo!.fromChatId!, groupedId, groupedChatId: chatId, messageId: forwardInfo!.fromMessageId!,
       });
       return;
     }
@@ -137,12 +141,12 @@ export default function useInnerHandlers(
     if (isChatWithRepliesBot && replyToChatId) {
       focusMessageInComments({
         chatId: replyToChatId,
-        threadId: replyToTopMessageId,
-        messageId: forwardInfo!.fromMessageId,
+        threadId: replyToTopMessageId!,
+        messageId: forwardInfo!.fromMessageId!,
       });
     } else {
       focusMessage({
-        chatId: forwardInfo!.fromChatId, messageId: forwardInfo!.fromMessageId,
+        chatId: forwardInfo!.fromChatId!, messageId: forwardInfo!.fromMessageId!,
       });
     }
   }, [
@@ -155,6 +159,15 @@ export default function useInnerHandlers(
 
     selectMessage(e, groupedId);
   }, [selectMessage, groupedId]);
+
+  const handleTopicChipClick = useCallback(() => {
+    if (!messageTopic) return;
+    focusMessage({
+      chatId: isChatWithRepliesBot && replyToChatId ? replyToChatId : chatId,
+      threadId: messageTopic.id,
+      messageId,
+    });
+  }, [chatId, focusMessage, isChatWithRepliesBot, messageTopic, messageId, replyToChatId]);
 
   return {
     handleAvatarClick,
@@ -173,5 +186,6 @@ export default function useInnerHandlers(
     handleFocus,
     handleFocusForwarded,
     handleDocumentGroupSelectAll: selectWithGroupedId,
+    handleTopicChipClick,
   };
 }

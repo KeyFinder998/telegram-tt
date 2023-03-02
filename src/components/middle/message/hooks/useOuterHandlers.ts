@@ -63,13 +63,10 @@ export default function useOuterHandlers(
     }
   }
 
-  function handleSendQuickReaction(e: React.MouseEvent) {
-    const { x, y } = e.currentTarget.getBoundingClientRect();
+  function handleSendQuickReaction() {
     sendDefaultReaction({
       chatId,
       messageId,
-      x,
-      y,
     });
   }
 
@@ -90,14 +87,10 @@ export default function useOuterHandlers(
     }
   }
 
-  function handleDoubleTap(e: React.MouseEvent<HTMLDivElement, MouseEvent>) {
-    const { pageX: x, pageY: y } = e;
-
+  function handleDoubleTap() {
     sendDefaultReaction({
       chatId,
       messageId,
-      x,
-      y,
     });
   }
 
@@ -112,7 +105,7 @@ export default function useOuterHandlers(
     if (doubleTapTimeoutRef.current) {
       clearInterval(doubleTapTimeoutRef.current);
       doubleTapTimeoutRef.current = undefined;
-      handleDoubleTap(e);
+      handleDoubleTap();
       return;
     }
 
@@ -136,7 +129,7 @@ export default function useOuterHandlers(
   }
 
   function handleContainerDoubleClick() {
-    if (IS_TOUCH_ENV) return;
+    if (IS_TOUCH_ENV || !canReply) return;
 
     setReplyingToId({ messageId });
   }
@@ -168,7 +161,7 @@ export default function useOuterHandlers(
         return false;
       }),
       onRelease: () => {
-        if (!startedAt) {
+        if (!startedAt || !canReply) {
           return;
         }
 
